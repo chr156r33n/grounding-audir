@@ -304,6 +304,15 @@ def _provider_details(run: GroundingRun) -> None:
 
         st.markdown("#### Final response")
         st.text(run.response_text or "No final response text was exposed.")
+        suggestions = run.metadata.get("search_suggestions") or []
+        if run.provider_id == "gemini" and suggestions:
+            st.markdown("#### Google Search suggestions")
+            st.caption(
+                "Rendered in isolated iframes using the exact provider-supplied "
+                "Search Suggestions markup."
+            )
+            for markup in suggestions:
+                st.components.v1.html(markup, height=80, scrolling=False)
         with st.expander("Provider metadata"):
             st.json(run.metadata)
         if st.checkbox("Show sanitised raw response", key=f"raw_{run.run_id}_{run.provider_id}"):

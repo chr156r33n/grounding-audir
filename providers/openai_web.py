@@ -55,11 +55,14 @@ class OpenAIWebProvider(GroundingProvider):
         source_map: dict[str, Any] = {}
         sources_observable = False
         search_calls = 0
+        search_actions = 0
 
-        for item in output:
+        for output_index, item in enumerate(output):
             if item.get("type") == "web_search_call":
                 search_calls += 1
                 action = item.get("action") or {}
+                if action.get("type") in {None, "search"}:
+                    search_actions += 1
                 query = action.get("query")
                 queries = action.get("queries") or ([query] if query else [])
                 for query_value in queries:
@@ -86,7 +89,7 @@ class OpenAIWebProvider(GroundingProvider):
                         run.sources.append(built)
 
             if item.get("type") == "message":
-                for content in item.get("content") or []:
+                for content_index, content in enumerate(item.get("content") or []):
                     if content.get("type") not in {"output_text", "text"}:
                         continue
                     text = content.get("text") or ""
@@ -104,7 +107,11 @@ class OpenAIWebProvider(GroundingProvider):
                             title=annotation.get("title"),
                             start_index=annotation.get("start_index"),
                             end_index=annotation.get("end_index"),
-                            cited_text=_slice(text, annotation.get("start_index"), annotation.get("end_index")),
+                            cited_text=None,
+                            metadata={
+                                "output_index": output_index,
+                                "content_index": content_index,
+                            },
                         )
                         run.citations.append(citation)
                         key = self.build_source(request, url).normalized_url or url
@@ -116,6 +123,7 @@ class OpenAIWebProvider(GroundingProvider):
         run.metadata = {
             "actual_prompt": CANONICAL_INSTRUCTION.format(query=request.input_phrase),
             "search_call_count": search_calls,
+            "search_action_count": search_actions,
             "unique_generated_query_count": len({item.query for item in run.generated_queries}),
             "market_requested": request.market,
             "market_applied": bool(_market_country(request.market)),
@@ -123,12 +131,13 @@ class OpenAIWebProvider(GroundingProvider):
             "language_applied": False,
             "usage": raw.get("usage"),
             "sources_observable": sources_observable,
+            "response_id": raw.get("id"),
+            "response_status": raw.get("status"),
+            "actual_model": raw.get("model"),
+            "service_tier": raw.get("service_tier"),
+            "incomplete_details": raw.get("incomplete_details"),
         }
         return self.finish_states(run, retrieval_complete=sources_observable)
-
-
-def _slice(text: str, start: Any, end: Any) -> str | None:
-    return text[start:end] if isinstance(start, int) and isinstance(end, int) else None
 
 
 def _market_country(market: str | None) -> str | None:

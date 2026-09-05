@@ -12,7 +12,8 @@ from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 class GeminiProvider(GroundingProvider):
     id = "gemini"
     name = "Gemini + Google Search"
-    default_model = "gemini-3.5-flash"
+    default_model = "gemini-3.6-flash"
+    api_version = "v1"
     fields = (
         ProviderField("api_key", "Gemini API key", secret=True),
         ProviderField("model", "Model", required=True, default=default_model),
@@ -29,17 +30,17 @@ class GeminiProvider(GroundingProvider):
 
     def run(self, request: GroundingRequest, config: dict[str, Any]):
         from google import genai
-        from google.genai import types
 
         started = perf_counter()
         model = config.get("model") or self.default_model
-        client = genai.Client(api_key=config["api_key"])
-        response = client.models.generate_content(
+        client = genai.Client(
+            api_key=config["api_key"],
+            http_options={"api_version": self.api_version},
+        )
+        response = client.interactions.create(
             model=model,
-            contents=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-            ),
+            input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
+            tools=[{"type": "google_search", "search_types": ["web_search"]}],
         )
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)
@@ -50,43 +51,67 @@ class GeminiProvider(GroundingProvider):
         raw = as_plain_data(raw_response) or {}
         run = self.new_run(request, model)
         run.raw_response = raw
-        run.response_text = _response_text(raw_response, raw)
-        candidate = ((raw.get("candidates") or [{}])[0]) if isinstance(raw, dict) else {}
-        metadata = candidate.get("grounding_metadata") or candidate.get("groundingMetadata") or {}
+        steps = raw.get("steps") or [] if isinstance(raw, dict) else []
+        text_parts: list[str] = []
+        suggestions: list[str] = []
+        search_calls = 0
 
-        queries = metadata.get("web_search_queries") or metadata.get("webSearchQueries") or []
-        run.generated_queries = [
-            GeneratedQuery(str(query), index + 1)
-            for index, query in enumerate(queries)
-            if query
-        ]
+        for step_index, step in enumerate(steps):
+            step_type = step.get("type")
+            if step_type == "google_search_call":
+                search_calls += 1
+                arguments = step.get("arguments") or {}
+                for query in arguments.get("queries") or []:
+                    if query:
+                        run.generated_queries.append(
+                            GeneratedQuery(
+                                str(query),
+                                len(run.generated_queries) + 1,
+                                {
+                                    "call_id": step.get("id"),
+                                    "search_type": step.get("search_type"),
+                                },
+                            )
+                        )
+            elif step_type == "google_search_result":
+                for result in step.get("result") or []:
+                    markup = result.get("search_suggestions")
+                    if markup:
+                        suggestions.append(markup)
+            elif step_type == "model_output":
+                for content_index, content in enumerate(step.get("content") or []):
+                    if content.get("type") != "text":
+                        continue
+                    text = content.get("text") or ""
+                    text_parts.append(text)
+                    for annotation in content.get("annotations") or []:
+                        if annotation.get("type") != "url_citation" or not annotation.get("url"):
+                            continue
+                        start = annotation.get("start_index")
+                        end = annotation.get("end_index")
+                        run.citations.append(
+                            self.build_citation(
+                                request,
+                                annotation["url"],
+                                title=annotation.get("title"),
+                                start_index=start,
+                                end_index=end,
+                                cited_text=_utf8_slice(text, start, end),
+                                metadata={
+                                    "step_index": step_index,
+                                    "content_index": content_index,
+                                },
+                            )
+                        )
 
-        chunks = metadata.get("grounding_chunks") or metadata.get("groundingChunks") or []
-        supports = metadata.get("grounding_supports") or metadata.get("groundingSupports") or []
-        for support in supports:
-            segment = support.get("segment") or {}
-            for index in support.get("grounding_chunk_indices", support.get("groundingChunkIndices", [])):
-                if not isinstance(index, int) or not 0 <= index < len(chunks):
-                    continue
-                web = chunks[index].get("web") or {}
-                url = web.get("uri") or web.get("url")
-                if not url:
-                    continue
-                run.citations.append(
-                    self.build_citation(
-                        request,
-                        url,
-                        title=web.get("title"),
-                        start_index=segment.get("start_index", segment.get("startIndex")),
-                        end_index=segment.get("end_index", segment.get("endIndex")),
-                        cited_text=segment.get("text"),
-                        metadata={"source": "grounding_support", "grounding_chunk_index": index},
-                    )
-                )
-
+        run.response_text = "\n".join(part for part in text_parts if part) or getattr(
+            raw_response, "output_text", None
+        )
         run.search_performed = (
             ObservationState.YES
-            if queries or chunks or metadata.get("search_entry_point") or metadata.get("searchEntryPoint")
+            if search_calls
+            else ObservationState.NO
+            if steps
             else ObservationState.UNKNOWN
         )
         run.metadata = {
@@ -95,21 +120,24 @@ class GeminiProvider(GroundingProvider):
             "market_applied": False,
             "language_requested": request.language,
             "language_applied": False,
-            "usage": raw.get("usage_metadata") or raw.get("usageMetadata"),
+            "usage": raw.get("usage"),
+            "interaction_id": raw.get("id"),
+            "response_status": raw.get("status"),
+            "actual_model": raw.get("model"),
+            "search_call_count": search_calls,
+            "search_suggestions": suggestions,
             "retrieval_note": (
-                "The selected Gemini API surface does not expose a complete retrieved-source list; "
-                "citations must not be treated as the full retrieval set."
+                "Gemini Interactions does not expose raw SERP rows or a complete "
+                "retrieved-source list; citations must not be treated as retrieval."
             ),
         }
         return self.finish_states(run, retrieval_complete=False)
 
 
-def _response_text(response: Any, raw: Any) -> str | None:
-    text = getattr(response, "text", None)
-    if text:
-        return text
-    if not isinstance(raw, dict):
+def _utf8_slice(text: str, start: Any, end: Any) -> str | None:
+    if not isinstance(start, int) or not isinstance(end, int):
         return None
-    parts = (((raw.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-    values = [part.get("text") for part in parts if isinstance(part, dict) and part.get("text")]
-    return "\n".join(values) or None
+    try:
+        return text.encode("utf-8")[start:end].decode("utf-8")
+    except UnicodeDecodeError:
+        return None

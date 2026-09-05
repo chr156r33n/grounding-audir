@@ -12,11 +12,17 @@ from .microsoft_common import azure_credential, parse_responses_result
 class MicrosoftWebProvider(GroundingProvider):
     id = "microsoft_web"
     name = "Microsoft Foundry Web Search"
-    default_model = "gpt-5-mini"
+    default_model = "gpt-5.5"
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),
         ProviderField("model", "Model deployment", default=default_model),
+        ProviderField(
+            "search_context_size",
+            "Search context size (low, medium, or high)",
+            required=False,
+            default="medium",
+        ),
         ProviderField(
             "azure_token",
             "Azure access token (optional when DefaultAzureCredential is configured)",
@@ -26,68 +32,49 @@ class MicrosoftWebProvider(GroundingProvider):
     )
     capabilities = ProviderCapabilities(
         generated_queries=True,
-        retrieved_sources=False,
+        retrieved_sources=True,
         citations=True,
+        market_control=True,
         can_force_search=True,
     )
 
+    def validate_config(self, config: dict[str, Any]) -> list[str]:
+        errors = super().validate_config(config)
+        if (config.get("search_context_size") or "medium").lower() not in {
+            "low",
+            "medium",
+            "high",
+        }:
+            errors.append("Search context size must be low, medium, or high.")
+        return errors
+
     def run(self, request: GroundingRequest, config: dict[str, Any]):
         from azure.ai.projects import AIProjectClient
-        from azure.ai.projects.models import (
-            PromptAgentDefinition,
-            WebSearchApproximateLocation,
-            WebSearchTool,
-        )
 
         started = perf_counter()
         model = config.get("model") or self.default_model
         country = _market_country(request.market)
-        tool = (
-            WebSearchTool(
-                user_location=WebSearchApproximateLocation(country=country)
-            )
-            if country
-            else WebSearchTool()
-        )
-        agent_name = f"grounding-web-{request.run_id}"[:63].rstrip("-")
+        tool: dict[str, Any] = {
+            "type": "web_search",
+            "search_context_size": (config.get("search_context_size") or "medium").lower(),
+        }
+        if country:
+            tool["user_location"] = {"type": "approximate", "country": country}
         with AIProjectClient(
             endpoint=config["project_endpoint"],
             credential=azure_credential(config),
         ) as project:
-            client = project.get_openai_client()
-            agent = project.agents.create_version(
-                agent_name=agent_name,
-                definition=PromptAgentDefinition(
-                    model=model,
-                    instructions="Use web search for current public-web evidence.",
-                    tools=[tool],
-                ),
-                description="Ephemeral Grounding Source Observatory run",
-            )
-            cleanup_succeeded = True
-            try:
+            with project.get_openai_client() as client:
                 response = client.responses.create(
+                    model=model,
                     input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
+                    tools=[tool],
                     tool_choice="required",
-                    extra_body={
-                        "agent_reference": {
-                            "name": agent.name,
-                            "type": "agent_reference",
-                        }
-                    },
+                    include=["web_search_call.action.sources"],
                 )
-            finally:
-                try:
-                    project.agents.delete_version(
-                        agent_name=agent.name,
-                        agent_version=agent.version,
-                    )
-                except Exception:
-                    cleanup_succeeded = False
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)
         run.finished_at = utc_now()
-        run.metadata["ephemeral_agent_cleanup_succeeded"] = cleanup_succeeded
         return run
 
     def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):
@@ -97,9 +84,10 @@ class MicrosoftWebProvider(GroundingProvider):
             request,
             model,
             (
-                "Microsoft Foundry Web Search did not expose a complete raw retrieval set in this "
-                "response. Retrieval presence cannot be inferred from citations."
+                "Foundry Web Search was asked to include its complete consulted-source list. "
+                "Retrieval remains UNKNOWN if that optional field is absent."
             ),
+            sources_supported=True,
         )
         run.metadata["market_applied"] = bool(_market_country(request.market))
         run.metadata["language_applied"] = False

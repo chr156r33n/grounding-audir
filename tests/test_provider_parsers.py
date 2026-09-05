@@ -33,6 +33,7 @@ def test_gemini_citations_do_not_become_retrieval(request):
     assert run.target_cited is ObservationState.YES
     assert run.target_retrieved is ObservationState.UNKNOWN
     assert run.citations[0].cited_text == "The Four Seasons"
+    assert run.metadata["search_suggestions"]
 
 
 def test_openai_distinguishes_sources_and_citations(request):
@@ -41,7 +42,7 @@ def test_openai_distinguishes_sources_and_citations(request):
     assert run.target_cited is ObservationState.YES
     assert len(run.sources) == 2
     assert run.sources[0].cited is ObservationState.YES
-    assert run.citations[0].cited_text == "Four Seasons"
+    assert run.citations[0].cited_text is None
 
 
 def test_openai_empty_observable_sources_is_no(request):
@@ -59,8 +60,9 @@ def test_openai_empty_observable_sources_is_no(request):
 def test_microsoft_web_retrieval_remains_unknown(request):
     run = MicrosoftWebProvider().parse_response(FIXTURES["microsoft_web"], request)
     assert run.search_performed is ObservationState.YES
-    assert run.target_retrieved is ObservationState.UNKNOWN
+    assert run.target_retrieved is ObservationState.NO
     assert run.target_cited is ObservationState.NO
+    assert len(run.sources) == 1
 
 
 def test_bing_grounding_query_and_target_citation(request):

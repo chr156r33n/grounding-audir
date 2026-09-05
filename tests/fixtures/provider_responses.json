@@ -1,45 +1,62 @@
 {
   "gemini": {
-    "candidates": [
+    "id": "v1_fixture",
+    "model": "gemini-3.6-flash",
+    "status": "completed",
+    "steps": [
       {
-        "content": {
-          "parts": [
-            {
-              "text": "The Four Seasons is one option."
-            }
-          ]
-        },
-        "groundingMetadata": {
-          "webSearchQueries": [
+        "type": "google_search_call",
+        "id": "search-1",
+        "search_type": "web_search",
+        "arguments": {
+          "queries": [
             "best luxury hotels hong kong",
             "four seasons hong kong"
-          ],
-          "groundingChunks": [
-            {
-              "web": {
-                "uri": "https://www.fourseasons.com/hongkong/",
-                "title": "Four Seasons Hong Kong"
-              }
-            }
-          ],
-          "groundingSupports": [
-            {
-              "segment": {
-                "startIndex": 0,
-                "endIndex": 16,
-                "text": "The Four Seasons"
-              },
-              "groundingChunkIndices": [
-                0
-              ]
-            }
           ]
         }
+      },
+      {
+        "type": "google_search_result",
+        "call_id": "search-1",
+        "result": [
+          {
+            "search_suggestions": "<div>Google Search suggestions</div>"
+          }
+        ],
+        "is_error": false
+      },
+      {
+        "type": "model_output",
+        "content": [
+          {
+            "type": "text",
+            "text": "The Four Seasons is one option.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.fourseasons.com/hongkong/",
+                "title": "Four Seasons Hong Kong",
+                "start_index": 0,
+                "end_index": 16
+              }
+            ]
+          }
+        ]
       }
     ],
-    "usageMetadata": {
-      "promptTokenCount": 25,
-      "candidatesTokenCount": 10
+    "usage": {
+      "total_input_tokens": 25,
+      "total_output_tokens": 10,
+      "grounding_tool_count": [
+        {
+          "type": "google_search",
+          "count": 1
+        },
+        {
+          "type": "other",
+          "count": 0
+        }
+      ]
     }
   },
   "openai": {
@@ -92,7 +109,14 @@
       {
         "type": "web_search_call",
         "action": {
-          "query": "luxury hotels Hong Kong"
+          "type": "search",
+          "query": "luxury hotels Hong Kong",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://example.org/hotel"
+            }
+          ]
         }
       },
       {
@@ -119,15 +143,15 @@
     "output": [
       {
         "type": "bing_grounding_call",
-        "action": {
-          "queries": [
-            {
-              "query": "best luxury hotels hong kong",
-              "query_url": "https://www.bing.com/search?q=best+luxury+hotels+hong+kong"
-            },
-            "four seasons hong kong"
-          ]
-        }
+        "call_id": "bing-1",
+        "arguments": "{\"query\":\"best luxury hotels hong kong\"}",
+        "status": "completed"
+      },
+      {
+        "type": "bing_grounding_call",
+        "call_id": "bing-2",
+        "arguments": "{\"query\":\"four seasons hong kong\"}",
+        "status": "completed"
       },
       {
         "type": "message",

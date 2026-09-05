@@ -50,6 +50,12 @@ class MicrosoftBingProvider(GroundingProvider):
         errors = super().validate_config(config)
         if not config.get("connection_name") and not config.get("connection_id"):
             errors.append("A Bing grounding project connection name or resource ID is required.")
+        try:
+            count = int(config.get("result_count") or 7)
+            if not 1 <= count <= 50:
+                errors.append("Bing result count must be between 1 and 50.")
+        except (TypeError, ValueError):
+            errors.append("Bing result count must be an integer.")
         return errors
 
     def run(self, request: GroundingRequest, config: dict[str, Any]):
@@ -89,7 +95,6 @@ class MicrosoftBingProvider(GroundingProvider):
                     search_configurations=[search_configuration]
                 )
             )
-            client = project.get_openai_client()
             agent = project.agents.create_version(
                 agent_name=agent_name,
                 definition=PromptAgentDefinition(
@@ -101,16 +106,17 @@ class MicrosoftBingProvider(GroundingProvider):
             )
             cleanup_succeeded = True
             try:
-                response = client.responses.create(
-                    input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
-                    tool_choice="required",
-                    extra_body={
-                        "agent_reference": {
-                            "name": agent.name,
-                            "type": "agent_reference",
-                        }
-                    },
-                )
+                with project.get_openai_client() as client:
+                    response = client.responses.create(
+                        input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
+                        tool_choice="required",
+                        extra_body={
+                            "agent_reference": {
+                                "name": agent.name,
+                                "type": "agent_reference",
+                            }
+                        },
+                    )
             finally:
                 try:
                     project.agents.delete_version(

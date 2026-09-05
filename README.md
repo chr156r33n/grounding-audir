@@ -23,8 +23,8 @@ application timeout. Provider API costs may apply.
 
 | Provider | Configuration | Retrieval observability | Citation observability |
 |---|---|---|---|
-| Gemini + Google Search | Gemini API key; overridable model | Unknown unless the API exposes a complete source list | URL grounding citations |
-| Microsoft Foundry Web Search | Foundry project endpoint, model deployment, Azure identity/token | Usually unknown; citations are not a complete retrieval set | Inline URL citations |
+| Gemini + Google Search | Gemini API key; overridable model | Unknown: Interactions does not expose raw SERP rows | URL citation annotations |
+| Microsoft Foundry Web Search | Foundry project endpoint, model deployment, Azure identity/token | Complete consulted `sources` requested through Responses; unknown if omitted | Inline URL citations |
 | Microsoft Grounding with Bing Search | Foundry endpoint, deployment, Bing grounding connection name or resource ID, Azure identity/token | Unknown: raw grounding output is withheld | URL citations and generated-query events where exposed |
 | OpenAI Web Search | OpenAI API key; overridable model | Consulted `sources` requested through the Responses API | Inline URL citations |
 
@@ -32,16 +32,16 @@ For Microsoft providers, leave the optional access-token field empty to use
 the Azure `DefaultAzureCredential` chain (for example, an existing Azure CLI
 login). A pasted token is held only in process memory. The model/deployment
 must support the selected search tool in the configured Foundry project. The
-current Foundry API attaches search tools to a short-lived prompt-agent version;
-the identity therefore needs permission to create and delete agent versions.
-The app deletes that version after each request and reports cleanup status in
-provider metadata.
+explicit Bing provider attaches its tool to a short-lived prompt-agent version,
+so that identity also needs permission to create and delete agent versions. The
+app deletes that version after each Bing request and reports cleanup status.
 
 Model and API surfaces were checked on 5 September 2026, but they change. The
-current defaults are Gemini 3.5 Flash, Microsoft `gpt-5-mini`/`gpt-4.1-mini`,
+current defaults are Gemini 3.6 Flash, Microsoft `gpt-5.5`/`gpt-4.1-mini`,
 and OpenAI GPT-5.5; every model field is user-overridable. Check current
 provider documentation before relying on them:
 
+- [Gemini Interactions Google Search](https://ai.google.dev/gemini-api/docs/interactions/google-search)
 - [Gemini Google Search grounding](https://ai.google.dev/gemini-api/docs/google-search)
 - [Microsoft Foundry Web Search](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/web-search)
 - [Microsoft Grounding with Bing Search](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/bing-tools)
@@ -63,8 +63,10 @@ provider, model, locale, and exported evidence when comparing results.
 Credentials are password-masked and remain in Streamlit session/process
 memory. They are not written to disk, logged, or included in exports. Raw
 responses are optional in JSON exports and recursively redact secret-bearing
-fields. Retrieved content is rendered as text; the app does not crawl cited
-URLs or render provider HTML as unsafe markup.
+fields. Retrieved content is rendered as text and the app does not crawl cited
+URLs. Google Search Suggestions are the sole provider markup rendered, using
+isolated Streamlit iframes as required by Google; other provider HTML is not
+rendered.
 
 Normal tests use sanitised fixtures and make no live API calls:
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote_plus
 
 from core.enums import ObservationState
 from core.models import GeneratedQuery, GroundingRequest
@@ -37,14 +38,17 @@ def parse_responses_result(
     request: GroundingRequest,
     model: str | None,
     retrieval_note: str,
+    sources_supported: bool = False,
 ):
     raw = as_plain_data(raw_response) or {}
     run = provider.new_run(request, model)
     run.raw_response = raw
     output = raw.get("output") or [] if isinstance(raw, dict) else []
     search_calls = 0
+    sources_observable = False
+    source_map: dict[str, Any] = {}
 
-    for item in output:
+    for output_index, item in enumerate(output):
         item_type = str(item.get("type", ""))
         is_search_item = item_type in {"web_search_call", "bing_grounding_call"} or str(
             item.get("name", "")
@@ -61,6 +65,8 @@ def parse_responses_result(
             records = _query_records(action) + _query_records(arguments)
             seen_in_call: set[tuple[str, str | None]] = set()
             for query_value, query_url in records:
+                if not query_url and provider.id == "microsoft_bing":
+                    query_url = f"https://www.bing.com/search?q={quote_plus(query_value)}"
                 key = (query_value, query_url)
                 if key in seen_in_call:
                     continue
@@ -72,9 +78,31 @@ def parse_responses_result(
                         {"query_url": query_url} if query_url else {},
                     )
                 )
+            if sources_supported and "sources" in action:
+                sources_observable = True
+            if sources_supported:
+                for source in action.get("sources") or []:
+                    url = source.get("url")
+                    if not url:
+                        continue
+                    built = provider.build_source(
+                        request,
+                        url,
+                        title=source.get("title"),
+                        position=len(run.sources) + 1,
+                        metadata={
+                            key: value
+                            for key, value in source.items()
+                            if key not in {"url", "title"}
+                        },
+                    )
+                    key = built.normalized_url or built.raw_url
+                    if key not in source_map:
+                        source_map[key] = built
+                        run.sources.append(built)
 
         if item_type == "message":
-            for content in item.get("content") or []:
+            for content_index, content in enumerate(item.get("content") or []):
                 if content.get("type") not in {"output_text", "text"}:
                     continue
                 text = content.get("text") or ""
@@ -94,18 +122,22 @@ def parse_responses_result(
                             title=annotation.get("title"),
                             start_index=start,
                             end_index=end,
-                            cited_text=(
-                                text[start:end]
-                                if isinstance(start, int) and isinstance(end, int)
-                                else None
-                            ),
+                            cited_text=None,
                             metadata={
-                                key: value
-                                for key, value in annotation.items()
-                                if key not in {"type", "url", "title", "start_index", "end_index"}
+                                **{
+                                    key: value
+                                    for key, value in annotation.items()
+                                    if key
+                                    not in {"type", "url", "title", "start_index", "end_index"}
+                                },
+                                "output_index": output_index,
+                                "content_index": content_index,
                             },
                         )
                     )
+                    source_key = provider.build_source(request, url).normalized_url or url
+                    if source_key in source_map:
+                        source_map[source_key].cited = ObservationState.YES
 
     run.response_text = run.response_text or raw.get("output_text")
     run.search_performed = ObservationState.YES if search_calls else ObservationState.NO
@@ -117,8 +149,17 @@ def parse_responses_result(
         "language_requested": request.language,
         "usage": raw.get("usage"),
         "retrieval_note": retrieval_note,
+        "sources_observable": sources_observable,
+        "response_id": raw.get("id"),
+        "response_status": raw.get("status"),
+        "actual_model": raw.get("model"),
+        "service_tier": raw.get("service_tier"),
+        "incomplete_details": raw.get("incomplete_details"),
     }
-    return provider.finish_states(run, retrieval_complete=False)
+    return provider.finish_states(
+        run,
+        retrieval_complete=sources_supported and sources_observable,
+    )
 
 
 def _query_records(value: Any) -> list[tuple[str, str | None]]:

@@ -230,7 +230,17 @@ def _provider_details(run: GroundingRun) -> None:
         st.markdown("#### Generated queries")
         if run.generated_queries:
             st.dataframe(
-                [{"Sequence": item.sequence, "Query": item.query} for item in run.generated_queries],
+                [
+                    {
+                        "Sequence": item.sequence,
+                        "Query": item.query,
+                        "Search query URL": item.metadata.get("query_url"),
+                    }
+                    for item in run.generated_queries
+                ],
+                column_config={
+                    "Search query URL": st.column_config.LinkColumn("Search query URL")
+                },
                 hide_index=True,
                 use_container_width=True,
             )

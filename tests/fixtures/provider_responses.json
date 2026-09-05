@@ -121,7 +121,10 @@
         "type": "bing_grounding_call",
         "action": {
           "queries": [
-            "best luxury hotels hong kong",
+            {
+              "query": "best luxury hotels hong kong",
+              "query_url": "https://www.bing.com/search?q=best+luxury+hotels+hong+kong"
+            },
             "four seasons hong kong"
           ]
         }

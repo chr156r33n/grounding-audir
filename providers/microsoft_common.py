@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from core.enums import ObservationState
@@ -45,16 +46,32 @@ def parse_responses_result(
 
     for item in output:
         item_type = str(item.get("type", ""))
-        if item_type in {"web_search_call", "bing_grounding_call"}:
+        is_search_item = item_type in {"web_search_call", "bing_grounding_call"} or str(
+            item.get("name", "")
+        ) in {"web_search", "bing_grounding"}
+        if is_search_item:
             search_calls += 1
             action = item.get("action") or {}
-            query = action.get("query")
-            queries = action.get("queries") or ([query] if query else [])
-            for query_value in queries:
-                if query_value:
-                    run.generated_queries.append(
-                        GeneratedQuery(str(query_value), len(run.generated_queries) + 1)
+            arguments = item.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except (TypeError, ValueError):
+                    arguments = {}
+            records = _query_records(action) + _query_records(arguments)
+            seen_in_call: set[tuple[str, str | None]] = set()
+            for query_value, query_url in records:
+                key = (query_value, query_url)
+                if key in seen_in_call:
+                    continue
+                seen_in_call.add(key)
+                run.generated_queries.append(
+                    GeneratedQuery(
+                        query_value,
+                        len(run.generated_queries) + 1,
+                        {"query_url": query_url} if query_url else {},
                     )
+                )
 
         if item_type == "message":
             for content in item.get("content") or []:
@@ -102,3 +119,33 @@ def parse_responses_result(
         "retrieval_note": retrieval_note,
     }
     return provider.finish_states(run, retrieval_complete=False)
+
+
+def _query_records(value: Any) -> list[tuple[str, str | None]]:
+    records: list[tuple[str, str | None]] = []
+    if isinstance(value, dict):
+        query_url = next(
+            (
+                item
+                for key, item in value.items()
+                if key.lower() in {"query_url", "search_query_url", "bing_search_url"}
+                and isinstance(item, str)
+            ),
+            None,
+        )
+        for key, item in value.items():
+            normalized_key = key.lower()
+            if normalized_key in {"query", "search_query"} and isinstance(item, str):
+                records.append((item, query_url))
+            elif normalized_key in {"queries", "search_queries"} and isinstance(item, list):
+                for nested in item:
+                    if isinstance(nested, str):
+                        records.append((nested, None))
+                    else:
+                        records.extend(_query_records(nested))
+            elif isinstance(item, (dict, list)):
+                records.extend(_query_records(item))
+    elif isinstance(value, list):
+        for item in value:
+            records.extend(_query_records(item))
+    return records

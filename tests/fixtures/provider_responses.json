@@ -1,0 +1,176 @@
+{
+  "gemini": {
+    "id": "v1_fixture",
+    "model": "gemini-3.6-flash",
+    "status": "completed",
+    "steps": [
+      {
+        "type": "google_search_call",
+        "id": "search-1",
+        "search_type": "web_search",
+        "arguments": {
+          "queries": [
+            "best luxury hotels hong kong",
+            "four seasons hong kong"
+          ]
+        }
+      },
+      {
+        "type": "google_search_result",
+        "call_id": "search-1",
+        "result": [
+          {
+            "search_suggestions": "<div>Google Search suggestions</div>"
+          }
+        ],
+        "is_error": false
+      },
+      {
+        "type": "model_output",
+        "content": [
+          {
+            "type": "text",
+            "text": "The Four Seasons is one option.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.fourseasons.com/hongkong/",
+                "title": "Four Seasons Hong Kong",
+                "start_index": 0,
+                "end_index": 16
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "total_input_tokens": 25,
+      "total_output_tokens": 10,
+      "grounding_tool_count": [
+        {
+          "type": "google_search",
+          "count": 1
+        },
+        {
+          "type": "other",
+          "count": 0
+        }
+      ]
+    }
+  },
+  "openai": {
+    "output": [
+      {
+        "type": "web_search_call",
+        "action": {
+          "type": "search",
+          "query": "best luxury hotels hong kong",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://www.fourseasons.com/hongkong/?utm_source=test",
+              "title": "Four Seasons Hong Kong"
+            },
+            {
+              "type": "url",
+              "url": "https://example.org/hotels",
+              "title": "Other hotels"
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Four Seasons is a luxury hotel.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.fourseasons.com/hongkong/",
+                "title": "Four Seasons Hong Kong",
+                "start_index": 0,
+                "end_index": 12
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 30,
+      "output_tokens": 12
+    }
+  },
+  "microsoft_web": {
+    "output": [
+      {
+        "type": "web_search_call",
+        "action": {
+          "type": "search",
+          "query": "luxury hotels Hong Kong",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://example.org/hotel"
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Another hotel is recommended.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://example.org/hotel",
+                "title": "Example hotel",
+                "start_index": 0,
+                "end_index": 13
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "microsoft_bing": {
+    "output": [
+      {
+        "type": "bing_grounding_call",
+        "call_id": "bing-1",
+        "arguments": "{\"query\":\"best luxury hotels hong kong\"}",
+        "status": "completed"
+      },
+      {
+        "type": "bing_grounding_call",
+        "call_id": "bing-2",
+        "arguments": "{\"query\":\"four seasons hong kong\"}",
+        "status": "completed"
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Four Seasons is recommended.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://press.fourseasons.com/hongkong/",
+                "title": "Four Seasons",
+                "start_index": 0,
+                "end_index": 12
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import tldextract
@@ -18,6 +20,7 @@ _TRACKING_PARAMETERS = {
     "utm_source",
     "utm_term",
 }
+_HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 def _with_scheme(value: str) -> str:
@@ -32,7 +35,27 @@ def _hostname(value: str) -> str | None:
         return None
     if not host:
         return None
-    return host.rstrip(".").lower()
+    return _valid_hostname(host)
+
+
+def _valid_hostname(host: str) -> str | None:
+    host = host.rstrip(".").lower()
+    try:
+        return ipaddress.ip_address(host).compressed
+    except ValueError:
+        pass
+    try:
+        ascii_host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+    labels = ascii_host.split(".")
+    if (
+        not labels
+        or len(ascii_host) > 253
+        or any(not _HOST_LABEL.fullmatch(label) for label in labels)
+    ):
+        return None
+    return ascii_host
 
 
 def registrable_domain(value: str) -> str | None:
@@ -49,10 +72,9 @@ def normalize_url(value: str) -> str | None:
     """Conservatively normalize a web URL while retaining meaningful queries."""
     try:
         parsed = urlsplit(_with_scheme(value))
-        host = parsed.hostname
+        host = _valid_hostname(parsed.hostname or "")
         if not host or parsed.scheme.lower() not in {"http", "https"}:
             return None
-        host = host.rstrip(".").lower()
         try:
             port = parsed.port
         except ValueError:
@@ -60,7 +82,8 @@ def normalize_url(value: str) -> str | None:
         default_port = (parsed.scheme.lower() == "http" and port == 80) or (
             parsed.scheme.lower() == "https" and port == 443
         )
-        netloc = host if port is None or default_port else f"{host}:{port}"
+        rendered_host = f"[{host}]" if ":" in host else host
+        netloc = rendered_host if port is None or default_port else f"{rendered_host}:{port}"
         if parsed.username or parsed.password:
             return None
         path = parsed.path or "/"

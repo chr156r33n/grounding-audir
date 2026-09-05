@@ -48,3 +48,5 @@ def test_normalize_url_is_conservative():
     )
     assert normalize_url("ftp://example.com/file") is None
     assert normalize_url("https://user:password@example.com/") is None
+    assert normalize_url("not a domain") is None
+    assert normalize_url("https://münich.example/path") == "https://xn--mnich-kva.example/path"

@@ -8,6 +8,7 @@ from core.models import GroundingRequest, Target
 from providers.gemini import GeminiProvider
 from providers.microsoft_bing import MicrosoftBingProvider
 from providers.microsoft_web import MicrosoftWebProvider
+from providers.microsoft_web_iq import MicrosoftWebIQProvider
 from providers.openai_web import OpenAIWebProvider
 
 FIXTURES = json.loads(
@@ -55,6 +56,25 @@ def test_openai_empty_observable_sources_is_no(request):
     run = OpenAIWebProvider().parse_response(fixture, request)
     assert run.target_retrieved is ObservationState.NO
     assert run.target_cited is ObservationState.NO
+
+
+def test_microsoft_web_iq_exposes_retrieval_passages(request):
+    run = MicrosoftWebIQProvider().parse_response(FIXTURES["microsoft_web_iq"], request)
+    assert run.search_performed is ObservationState.YES
+    assert run.target_retrieved is ObservationState.YES
+    assert run.target_cited is ObservationState.NOT_APPLICABLE
+    assert len(run.sources) == 2
+    assert len(run.grounding_content) == 2
+    assert run.sources[0].retrieved is ObservationState.YES
+    assert run.sources[0].cited is ObservationState.NO
+    assert "retrieval evidence" in run.metadata["retrieval_note"]
+
+
+def test_microsoft_web_iq_empty_response_is_unknown_retrieval(request):
+    run = MicrosoftWebIQProvider().parse_response({}, request)
+    assert run.search_performed is ObservationState.UNKNOWN
+    assert run.target_retrieved is ObservationState.NO
+    assert run.target_cited is ObservationState.NOT_APPLICABLE
 
 
 def test_microsoft_web_retrieval_remains_unknown(request):

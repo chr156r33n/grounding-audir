@@ -5,4 +5,5 @@ google-genai==2.22.0
 openai==3.8.0
 azure-ai-projects==2.6.0
 azure-identity==1.25.3
+webiq==0.1.7
 pytest==9.1.1

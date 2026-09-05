@@ -25,6 +25,7 @@ application timeout. Provider API costs may apply.
 |---|---|---|---|
 | Gemini + Google Search | Gemini API key; overridable model | Unknown: Interactions does not expose raw SERP rows | URL citation annotations |
 | Microsoft Foundry Web Search | Foundry project endpoint, model deployment, Azure identity/token | Complete consulted `sources` requested through Responses; unknown if omitted | Inline URL citations |
+| Microsoft Web IQ | Web IQ API key from [webiq.microsoft.ai](https://webiq.microsoft.ai); optional max results (1–50) | Ranked `webResults` with passage-level content | N/A: retrieval API, not a citation layer |
 | Microsoft Grounding with Bing Search | Foundry endpoint, deployment, Bing grounding connection name or resource ID, Azure identity/token | Unknown: raw grounding output is withheld | URL citations and generated-query events where exposed |
 | OpenAI Web Search | OpenAI API key; overridable model | Consulted `sources` requested through the Responses API | Inline URL citations |
 
@@ -44,6 +45,7 @@ provider documentation before relying on them:
 - [Gemini Interactions Google Search](https://ai.google.dev/gemini-api/docs/interactions/google-search)
 - [Gemini Google Search grounding](https://ai.google.dev/gemini-api/docs/google-search)
 - [Microsoft Foundry Web Search](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/web-search)
+- [Microsoft Web IQ](https://webiq.microsoft.ai/documentation/sdk/)
 - [Microsoft Grounding with Bing Search](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/bing-tools)
 - [OpenAI Web Search](https://developers.openai.com/api/docs/guides/tools-web-search)
 

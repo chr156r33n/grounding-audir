@@ -27,6 +27,7 @@ def test_json_excludes_raw_by_default_and_redacts_when_included():
         "usage": {"input_tokens": 42},
     }
     without_raw = json.loads(export_json(request, [run]))
+    assert without_raw["experiment"]["queries"] == ["best hotel"]
     assert "raw_response" not in without_raw["provider_runs"][0]
     with_raw_text = export_json(request, [run], include_raw=True)
     assert "must-not-leak" not in with_raw_text

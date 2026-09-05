@@ -25,6 +25,11 @@ class GroundingRequest:
     market: str | None = None
     language: str | None = None
     provider_options: dict[str, Any] = field(default_factory=dict)
+    queries: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.queries:
+            self.queries = [self.input_phrase]
 
 
 @dataclass

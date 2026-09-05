@@ -69,7 +69,7 @@ def export_json(
     payload = {
         "experiment": {
             "run_id": request.run_id,
-            "queries": [request.input_phrase],
+            "queries": request.queries,
             "targets": [asdict(target) for target in request.targets],
             "market": request.market,
             "language": request.language,

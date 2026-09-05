@@ -1,0 +1,149 @@
+{
+  "gemini": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "The Four Seasons is one option."
+            }
+          ]
+        },
+        "groundingMetadata": {
+          "webSearchQueries": [
+            "best luxury hotels hong kong",
+            "four seasons hong kong"
+          ],
+          "groundingChunks": [
+            {
+              "web": {
+                "uri": "https://www.fourseasons.com/hongkong/",
+                "title": "Four Seasons Hong Kong"
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "segment": {
+                "startIndex": 0,
+                "endIndex": 16,
+                "text": "The Four Seasons"
+              },
+              "groundingChunkIndices": [
+                0
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 25,
+      "candidatesTokenCount": 10
+    }
+  },
+  "openai": {
+    "output": [
+      {
+        "type": "web_search_call",
+        "action": {
+          "type": "search",
+          "query": "best luxury hotels hong kong",
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://www.fourseasons.com/hongkong/?utm_source=test",
+              "title": "Four Seasons Hong Kong"
+            },
+            {
+              "type": "url",
+              "url": "https://example.org/hotels",
+              "title": "Other hotels"
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Four Seasons is a luxury hotel.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.fourseasons.com/hongkong/",
+                "title": "Four Seasons Hong Kong",
+                "start_index": 0,
+                "end_index": 12
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 30,
+      "output_tokens": 12
+    }
+  },
+  "microsoft_web": {
+    "output": [
+      {
+        "type": "web_search_call",
+        "action": {
+          "query": "luxury hotels Hong Kong"
+        }
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Another hotel is recommended.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://example.org/hotel",
+                "title": "Example hotel",
+                "start_index": 0,
+                "end_index": 13
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "microsoft_bing": {
+    "output": [
+      {
+        "type": "bing_grounding_call",
+        "action": {
+          "queries": [
+            "best luxury hotels hong kong",
+            "four seasons hong kong"
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Four Seasons is recommended.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://press.fourseasons.com/hongkong/",
+                "title": "Four Seasons",
+                "start_index": 0,
+                "end_index": 12
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

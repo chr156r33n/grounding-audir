@@ -1,0 +1,8 @@
+streamlit>=1.49,<2
+pandas>=2.3,<3
+tldextract>=5.3,<6
+google-genai>=1.33,<2
+openai>=1.102,<3
+azure-ai-projects>=1.0,<3
+azure-identity>=1.24,<2
+pytest>=8.4,<10

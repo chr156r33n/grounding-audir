@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+from time import perf_counter
+from typing import Any
+
+from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
+
+from .base import CANONICAL_INSTRUCTION, GroundingProvider
+from .microsoft_common import azure_credential, parse_responses_result
+
+
+class MicrosoftBingProvider(GroundingProvider):
+    id = "microsoft_bing"
+    name = "Microsoft Grounding with Bing Search"
+    default_model = "gpt-4.1-mini"
+    fields = (
+        ProviderField("project_endpoint", "Foundry project endpoint"),
+        ProviderField("model", "Model deployment", default=default_model),
+        ProviderField("connection_id", "Bing grounding connection ID"),
+        ProviderField(
+            "azure_token",
+            "Azure access token (optional when DefaultAzureCredential is configured)",
+            secret=True,
+            required=False,
+        ),
+        ProviderField("result_count", "Result count", required=False, default="7"),
+        ProviderField("freshness", "Freshness (optional)", required=False),
+    )
+    capabilities = ProviderCapabilities(
+        generated_queries=True,
+        retrieved_sources=False,
+        citations=True,
+        market_control=True,
+        language_control=True,
+        freshness_control=True,
+        can_force_search=True,
+    )
+
+    def run(self, request: GroundingRequest, config: dict[str, Any]):
+        from azure.ai.projects import AIProjectClient
+
+        started = perf_counter()
+        model = config.get("model") or self.default_model
+        search_configuration: dict[str, Any] = {
+            "connection_id": config["connection_id"],
+            "count": max(1, min(int(config.get("result_count") or 7), 50)),
+        }
+        if request.market:
+            search_configuration["market"] = request.market
+        if request.language:
+            search_configuration["language"] = request.language
+        if config.get("freshness"):
+            search_configuration["freshness"] = config["freshness"]
+        tool = {
+            "type": "bing_grounding",
+            "search_configurations": [search_configuration],
+        }
+        with AIProjectClient(
+            endpoint=config["project_endpoint"],
+            credential=azure_credential(config),
+        ) as project:
+            client = project.get_openai_client()
+            response = client.responses.create(
+                model=model,
+                input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
+                tools=[tool],
+                tool_choice="required",
+            )
+        run = self.parse_response(response, request, model)
+        run.latency_ms = round((perf_counter() - started) * 1000)
+        run.finished_at = utc_now()
+        run.metadata["search_configuration"] = {
+            key: value for key, value in search_configuration.items() if key != "connection_id"
+        }
+        return run
+
+    def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):
+        run = parse_responses_result(
+            self,
+            raw_response,
+            request,
+            model,
+            (
+                "Microsoft Bing Grounding does not expose the raw grounding tool output for this "
+                "request. Retrieval presence cannot be determined from citations alone."
+            ),
+        )
+        run.metadata["market_applied"] = bool(request.market)
+        run.metadata["language_applied"] = bool(request.language)
+        return run

@@ -7,9 +7,15 @@ import re
 from dataclasses import asdict
 from typing import Any
 
+from .matching import normalize_url, registrable_domain
 from .models import GroundingRequest, GroundingRun
 
-_SECRET_KEY = re.compile(r"(api.?key|authorization|bearer|credential|password|secret|token)", re.I)
+_SECRET_KEY = re.compile(
+    r"(^|[_.-])(api[_.-]?key|apikey|authorization|bearer|credentials?|password|secret|"
+    r"access[_.-]?token|accesstoken|refresh[_.-]?token|refreshtoken|id[_.-]?token|"
+    r"idtoken|token)($|[_.-])",
+    re.I,
+)
 _BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 
 CSV_COLUMNS = [
@@ -118,6 +124,8 @@ def export_csv(request: GroundingRequest, runs: list[GroundingRun]) -> str:
                         **base,
                         "generated_query": queries[min(index, len(queries) - 1)],
                         "source_url": citation.url,
+                        "normalized_url": normalize_url(citation.url) or "",
+                        "registrable_domain": registrable_domain(citation.url) or "",
                         "retrieved": "unknown",
                         "cited": "yes",
                         "target_match": ",".join(citation.target_matches),

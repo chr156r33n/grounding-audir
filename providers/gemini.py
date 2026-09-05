@@ -12,7 +12,7 @@ from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 class GeminiProvider(GroundingProvider):
     id = "gemini"
     name = "Gemini + Google Search"
-    default_model = "gemini-2.5-flash"
+    default_model = "gemini-3.5-flash"
     fields = (
         ProviderField("api_key", "Gemini API key", secret=True),
         ProviderField("model", "Model", required=True, default=default_model),
@@ -62,28 +62,27 @@ class GeminiProvider(GroundingProvider):
         ]
 
         chunks = metadata.get("grounding_chunks") or metadata.get("groundingChunks") or []
-        for chunk in chunks:
-            web = chunk.get("web") or {}
-            url = web.get("uri") or web.get("url")
-            if url:
+        supports = metadata.get("grounding_supports") or metadata.get("groundingSupports") or []
+        for support in supports:
+            segment = support.get("segment") or {}
+            for index in support.get("grounding_chunk_indices", support.get("groundingChunkIndices", [])):
+                if not isinstance(index, int) or not 0 <= index < len(chunks):
+                    continue
+                web = chunks[index].get("web") or {}
+                url = web.get("uri") or web.get("url")
+                if not url:
+                    continue
                 run.citations.append(
                     self.build_citation(
                         request,
                         url,
                         title=web.get("title"),
-                        metadata={"source": "grounding_chunk"},
+                        start_index=segment.get("start_index", segment.get("startIndex")),
+                        end_index=segment.get("end_index", segment.get("endIndex")),
+                        cited_text=segment.get("text"),
+                        metadata={"source": "grounding_support", "grounding_chunk_index": index},
                     )
                 )
-
-        supports = metadata.get("grounding_supports") or metadata.get("groundingSupports") or []
-        for support in supports:
-            segment = support.get("segment") or {}
-            for index in support.get("grounding_chunk_indices", support.get("groundingChunkIndices", [])):
-                if isinstance(index, int) and 0 <= index < len(run.citations):
-                    citation = run.citations[index]
-                    citation.start_index = segment.get("start_index", segment.get("startIndex"))
-                    citation.end_index = segment.get("end_index", segment.get("endIndex"))
-                    citation.cited_text = segment.get("text")
 
         run.search_performed = (
             ObservationState.YES

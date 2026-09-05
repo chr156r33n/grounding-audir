@@ -12,7 +12,7 @@ from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 class OpenAIWebProvider(GroundingProvider):
     id = "openai_web"
     name = "OpenAI Web Search"
-    default_model = "gpt-5-mini"
+    default_model = "gpt-5.5"
     fields = (
         ProviderField("api_key", "OpenAI API key", secret=True),
         ProviderField("model", "Model", required=True, default=default_model),
@@ -21,6 +21,7 @@ class OpenAIWebProvider(GroundingProvider):
         generated_queries=True,
         retrieved_sources=True,
         citations=True,
+        market_control=True,
         can_force_search=True,
     )
 
@@ -30,10 +31,14 @@ class OpenAIWebProvider(GroundingProvider):
         started = perf_counter()
         model = config.get("model") or self.default_model
         client = OpenAI(api_key=config["api_key"])
+        tool: dict[str, Any] = {"type": "web_search"}
+        country = _market_country(request.market)
+        if country:
+            tool["user_location"] = {"type": "approximate", "country": country}
         response = client.responses.create(
             model=model,
             input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
-            tools=[{"type": "web_search"}],
+            tools=[tool],
             tool_choice="required",
             include=["web_search_call.action.sources"],
         )
@@ -113,7 +118,7 @@ class OpenAIWebProvider(GroundingProvider):
             "search_call_count": search_calls,
             "unique_generated_query_count": len({item.query for item in run.generated_queries}),
             "market_requested": request.market,
-            "market_applied": False,
+            "market_applied": bool(_market_country(request.market)),
             "language_requested": request.language,
             "language_applied": False,
             "usage": raw.get("usage"),
@@ -124,3 +129,10 @@ class OpenAIWebProvider(GroundingProvider):
 
 def _slice(text: str, start: Any, end: Any) -> str | None:
     return text[start:end] if isinstance(start, int) and isinstance(end, int) else None
+
+
+def _market_country(market: str | None) -> str | None:
+    if not market:
+        return None
+    parts = market.replace("_", "-").split("-")
+    return parts[-1].upper() if len(parts) > 1 and len(parts[-1]) == 2 else None

@@ -24,6 +24,7 @@ def test_json_excludes_raw_by_default_and_redacts_when_included():
     run.raw_response = {
         "api_key": "must-not-leak",
         "nested": {"authorization": "Bearer secret-token"},
+        "usage": {"input_tokens": 42},
     }
     without_raw = json.loads(export_json(request, [run]))
     assert "raw_response" not in without_raw["provider_runs"][0]
@@ -31,6 +32,7 @@ def test_json_excludes_raw_by_default_and_redacts_when_included():
     assert "must-not-leak" not in with_raw_text
     assert "secret-token" not in with_raw_text
     assert "[REDACTED]" in with_raw_text
+    assert json.loads(with_raw_text)["provider_runs"][0]["raw_response"]["usage"]["input_tokens"] == 42
 
 
 def test_csv_has_stable_columns_and_provider_level_failure_row():

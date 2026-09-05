@@ -65,17 +65,26 @@ def parse_responses_result(
             records = _query_records(action) + _query_records(arguments)
             seen_in_call: set[tuple[str, str | None]] = set()
             for query_value, query_url in records:
+                query_url_constructed = False
                 if not query_url and provider.id == "microsoft_bing":
                     query_url = f"https://www.bing.com/search?q={quote_plus(query_value)}"
+                    query_url_constructed = True
                 key = (query_value, query_url)
                 if key in seen_in_call:
                     continue
                 seen_in_call.add(key)
+                query_metadata = {
+                    "call_id": item.get("call_id") or item.get("id"),
+                    "status": item.get("status"),
+                }
+                if query_url:
+                    query_metadata["query_url"] = query_url
+                    query_metadata["query_url_constructed"] = query_url_constructed
                 run.generated_queries.append(
                     GeneratedQuery(
                         query_value,
                         len(run.generated_queries) + 1,
-                        {"query_url": query_url} if query_url else {},
+                        query_metadata,
                     )
                 )
             if sources_supported and "sources" in action:

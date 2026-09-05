@@ -69,6 +69,7 @@ def test_bing_grounding_query_and_target_citation(request):
     run = MicrosoftBingProvider().parse_response(FIXTURES["microsoft_bing"], request)
     assert len(run.generated_queries) == 2
     assert run.generated_queries[0].metadata["query_url"].startswith("https://www.bing.com/")
+    assert run.generated_queries[0].metadata["query_url_constructed"] is True
     assert run.target_retrieved is ObservationState.UNKNOWN
     assert run.target_cited is ObservationState.YES
     assert "does not expose" in run.metadata["retrieval_note"]

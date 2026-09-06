@@ -56,6 +56,20 @@ def test_openai_empty_observable_sources_is_no(request):
     run = OpenAIWebProvider().parse_response(fixture, request)
     assert run.target_retrieved is ObservationState.NO
     assert run.target_cited is ObservationState.NO
+    assert "empty consulted-source list" in run.metadata["state_notes"]["target_retrieved"]
+
+
+def test_openai_missing_sources_field_is_unknown(request):
+    fixture = {
+        "output": [
+            {"type": "web_search_call", "action": {"type": "search", "query": "q"}},
+            {"type": "message", "content": [{"type": "output_text", "text": "No result"}]},
+        ]
+    }
+    run = OpenAIWebProvider().parse_response(fixture, request)
+    assert run.target_retrieved is ObservationState.UNKNOWN
+    assert run.metadata["sources_observable"] is False
+    assert "sources" in run.metadata["state_notes"]["target_retrieved"].lower()
 
 
 def test_microsoft_web_iq_exposes_retrieval_passages(request):

@@ -60,6 +60,10 @@ organic rank.
 Grounding is variable. A single run is weak evidence, so preserve the run ID,
 provider, model, locale, and exported evidence when comparing results.
 
+When a state is **UNKNOWN**, expand the provider section and read **Why these
+states?** — each YES/NO/UNKNOWN/N/A value includes a plain-language reason
+(for example, OpenAI search ran but omitted `web_search_call.action.sources`).
+
 ## Data and security
 
 Credentials are password-masked and remain in Streamlit session/process

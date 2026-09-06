@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from core.diagnostics import attach_observation_diagnostics
 from core.enums import ObservationState, ProviderType
 from core.models import (
     GeneratedQuery,
@@ -123,7 +124,7 @@ class MicrosoftWebIQProvider(GroundingProvider):
         }
         run = self.finish_states(run, retrieval_complete=True, citation_complete=False)
         run.target_cited = ObservationState.NOT_APPLICABLE
-        return run
+        return attach_observation_diagnostics(run)
 
 
 def _locale(request: GroundingRequest) -> tuple[str | None, str | None]:

@@ -6,6 +6,7 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+from core.diagnostics import attach_observation_diagnostics
 from core.enums import ObservationState, ProviderType, RunStatus
 from core.matching import matching_targets, normalize_url, registrable_domain
 from core.models import (
@@ -152,4 +153,4 @@ class GroundingProvider(ABC):
             if citation_complete
             else ObservationState.UNKNOWN
         )
-        return run
+        return attach_observation_diagnostics(run)

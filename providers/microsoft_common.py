@@ -159,6 +159,8 @@ def parse_responses_result(
         "usage": raw.get("usage"),
         "retrieval_note": retrieval_note,
         "sources_observable": sources_observable,
+        "sources_requested": sources_supported,
+        "include_fields": ["web_search_call.action.sources"] if sources_supported else [],
         "response_id": raw.get("id"),
         "response_status": raw.get("status"),
         "actual_model": raw.get("model"),

@@ -13,6 +13,7 @@ class MicrosoftBingProvider(GroundingProvider):
     id = "microsoft_bing"
     name = "Microsoft Grounding with Bing Search"
     default_model = "gpt-4.1-mini"
+    timeout_seconds = 120.0
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),

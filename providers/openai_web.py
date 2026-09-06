@@ -6,6 +6,7 @@ from typing import Any
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
 from core.diagnostics import attach_observation_diagnostics
+from core.timeouts import request_timeout_seconds
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import parse_responses_result
 
@@ -14,6 +15,7 @@ class OpenAIWebProvider(GroundingProvider):
     id = "openai_web"
     name = "OpenAI Web Search"
     default_model = "gpt-5.5"
+    timeout_seconds = 120.0
     fields = (
         ProviderField("api_key", "OpenAI API key", secret=True),
         ProviderField("model", "Model", required=True, default=default_model),
@@ -31,7 +33,8 @@ class OpenAIWebProvider(GroundingProvider):
 
         started = perf_counter()
         model = config.get("model") or self.default_model
-        client = OpenAI(api_key=config["api_key"])
+        timeout = request_timeout_seconds(config, default=self.timeout_seconds)
+        client = OpenAI(api_key=config["api_key"], timeout=max(timeout - 5.0, 10.0))
         tool: dict[str, Any] = {"type": "web_search"}
         country = _market_country(request.market)
         if country:
@@ -46,6 +49,7 @@ class OpenAIWebProvider(GroundingProvider):
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)
         run.finished_at = utc_now()
+        run.metadata["http_timeout_seconds"] = max(timeout - 5.0, 10.0)
         return run
 
     def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):

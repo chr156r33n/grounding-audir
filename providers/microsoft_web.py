@@ -14,6 +14,7 @@ class MicrosoftWebProvider(GroundingProvider):
     id = "microsoft_web"
     name = "Microsoft Foundry Web Search"
     default_model = "gpt-5.5"
+    timeout_seconds = 120.0
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),

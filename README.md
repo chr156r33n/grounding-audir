@@ -16,8 +16,9 @@ streamlit run app.py
 ```
 
 Enter a query, target, match mode, and credentials in the app, then explicitly
-select **Run test**. API calls are concurrent and each provider has a 45-second
-application timeout. Provider API costs may apply.
+select **Run test**. API calls are concurrent. The default per-provider timeout is
+90 seconds (configurable in the form; OpenAI and other web-search providers use
+at least 120 seconds when needed). Provider API costs may apply.
 
 ## Provider configuration
 

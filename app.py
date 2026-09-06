@@ -70,6 +70,17 @@ def _configuration_form():
             market_label = st.selectbox("Country / market", list(MARKETS))
         with col3:
             language_label = st.selectbox("Language", list(LANGUAGES))
+        timeout_seconds = st.slider(
+            "Per-provider timeout (seconds)",
+            min_value=30,
+            max_value=180,
+            value=90,
+            step=15,
+            help=(
+                "Each provider runs on its own timer. Web search calls often need 60–120 seconds, "
+                "especially OpenAI with consulted sources."
+            ),
+        )
 
         st.subheader("Providers")
         selected: list[str] = []
@@ -102,6 +113,7 @@ def _configuration_form():
         "match_mode": MATCH_LABELS[match_label],
         "market": MARKETS[market_label],
         "language": LANGUAGES[language_label],
+        "timeout_seconds": timeout_seconds,
     }
     return submitted, values, selected, configs
 
@@ -123,6 +135,7 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         targets=[Target(values["target"].strip(), values["match_mode"])],
         market=values["market"],
         language=values["language"],
+        provider_options={"timeout_seconds": values["timeout_seconds"]},
     )
     jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
     st.session_state["grounding_request"] = request
@@ -226,6 +239,15 @@ def _provider_details(run: GroundingRun) -> None:
         st.write(summary)
         if run.error:
             st.error(run.error.safe_message)
+            if run.status.value == "timed_out":
+                timeout = run.metadata.get("timeout_seconds")
+                retries = run.metadata.get("retry_count")
+                st.caption(
+                    f"Timed out after {run.latency_ms} ms"
+                    + (f" (configured limit: {timeout:g}s)" if timeout else "")
+                    + (f"; retries attempted: {retries}" if retries else "")
+                    + ". Web search providers often need 90–120 seconds."
+                )
 
         state_notes = run.metadata.get("state_notes") or build_state_notes(run)
         unknown_fields = unknown_observation_fields(run)

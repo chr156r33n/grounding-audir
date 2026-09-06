@@ -5,9 +5,19 @@ from typing import Any
 
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
+from core.debug import (
+    DebugTrace,
+    build_run_debug_context,
+    debug_mode_enabled,
+    foundry_web_search_request_body,
+    record_api_request,
+    record_exception_debug,
+)
 from core.diagnostics import attach_observation_diagnostics
+from core.timeouts import request_timeout_seconds
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
+from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, model_field
 
 
 class MicrosoftWebProvider(GroundingProvider):
@@ -18,12 +28,14 @@ class MicrosoftWebProvider(GroundingProvider):
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),
-        ProviderField("model", "Model deployment", default=default_model),
+        model_field(MICROSOFT_FOUNDRY_WEB_SEARCH, label="Model deployment"),
         ProviderField(
             "search_context_size",
-            "Search context size (low, medium, or high)",
-            required=False,
+            "Search context size",
+            required=True,
             default="medium",
+            choices=("low", "medium", "high"),
+            help="Documented web_search search_context_size values.",
         ),
         ProviderField(
             "azure_token",
@@ -53,6 +65,8 @@ class MicrosoftWebProvider(GroundingProvider):
     def run(self, request: GroundingRequest, config: dict[str, Any]):
         from azure.ai.projects import AIProjectClient
 
+        debug = debug_mode_enabled(config, request)
+        trace = DebugTrace(self.id, debug)
         started = perf_counter()
         model = config.get("model") or self.default_model
         country = _market_country(request.market)
@@ -62,21 +76,40 @@ class MicrosoftWebProvider(GroundingProvider):
         }
         if country:
             tool["user_location"] = {"type": "approximate", "country": country}
-        with AIProjectClient(
-            endpoint=config["project_endpoint"],
-            credential=azure_credential(config),
-        ) as project:
-            with project.get_openai_client() as client:
-                response = client.responses.create(
-                    model=model,
-                    input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
-                    tools=[tool],
-                    tool_choice="required",
-                    include=["web_search_call.action.sources"],
-                )
+        request_body = foundry_web_search_request_body(model, request, tool)
+        trace.event("request_prepared", request_body=request_body)
+        try:
+            with AIProjectClient(
+                endpoint=config["project_endpoint"],
+                credential=azure_credential(config),
+            ) as project:
+                trace.event("foundry_client_ready")
+                with project.get_openai_client() as client:
+                    trace.event("http_request_started")
+                    response = client.responses.create(**request_body)
+                    trace.event("http_request_completed")
+        except Exception as exc:
+            trace.event("http_request_failed")
+            if debug:
+                run = self.new_run(request, model)
+                run.metadata["debug"] = {
+                    "context": build_run_debug_context(self.id, request, config),
+                    "trace": trace.events,
+                }
+                record_exception_debug(run, exc)
+            raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)
         run.finished_at = utc_now()
+        if debug:
+            run.metadata["debug"] = {"context": build_run_debug_context(self.id, request, config)}
+            record_api_request(
+                run,
+                api="azure.foundry.responses",
+                operation="responses.create",
+                request_body=request_body,
+            )
+            trace.attach(run)
         return run
 
     def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):

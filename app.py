@@ -10,7 +10,7 @@ from core.execution import execute_providers
 from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
-from core.models import GroundingRequest, GroundingRun, Target
+from core.models import GroundingRequest, GroundingRun, ProviderField, Target
 from providers.registry import PROVIDERS
 
 st.set_page_config(page_title="Grounding Source Observatory", page_icon="🔭", layout="wide")
@@ -55,6 +55,62 @@ def main() -> None:
         )
 
 
+def _render_provider_field(provider_id: str, field: ProviderField) -> str:
+    key = f"config_{provider_id}_{field.key}"
+    if field.choices:
+        options = list(field.choices)
+        default_index = options.index(field.default) if field.default in options else 0
+        return st.selectbox(
+            field.label,
+            options,
+            index=default_index,
+            help=field.help,
+            key=key,
+        )
+    return st.text_input(
+        field.label,
+        value=field.default,
+        type="password" if field.secret else "default",
+        help=field.help,
+        key=key,
+    )
+
+
+def _debug_mode_enabled(request: GroundingRequest | None) -> bool:
+    return bool(request and request.provider_options.get("debug_mode"))
+
+
+def _render_debug_panel(run: GroundingRun, *, expanded: bool = False) -> None:
+    debug = run.metadata.get("debug") or {}
+    if not debug and run.raw_response is None:
+        return
+    with st.expander("Debug trace", expanded=expanded):
+        trace = debug.get("trace") or []
+        if trace:
+            st.markdown("**Execution timeline**")
+            st.dataframe(trace, hide_index=True, use_container_width=True)
+        if debug.get("context"):
+            st.markdown("**Run context**")
+            st.json(debug["context"])
+        if debug.get("request_body"):
+            st.markdown("**API request body (sanitised)**")
+            st.json(debug["request_body"])
+        if debug.get("response_summary"):
+            st.markdown("**Response summary**")
+            st.json(debug["response_summary"])
+        if debug.get("exception"):
+            st.markdown("**Exception details**")
+            st.json(debug["exception"])
+        if debug.get("api"):
+            st.caption(f"API: {debug.get('api')} · operation: {debug.get('operation')}")
+        if debug.get("notes"):
+            st.caption(debug["notes"])
+        from core.export import redact_secrets
+
+        st.markdown("**Raw provider response (sanitised)**")
+        st.json(redact_secrets(run.raw_response))
+
+
 def _configuration_form():
     with st.form("grounding-run-form"):
         st.subheader("Test configuration")
@@ -81,6 +137,14 @@ def _configuration_form():
                 "especially OpenAI with consulted sources."
             ),
         )
+        debug_mode = st.checkbox(
+            "Debug mode",
+            value=False,
+            help=(
+                "Capture request payloads, execution traces, response summaries, and raw provider "
+                "responses for every provider run. Secrets are still redacted."
+            ),
+        )
 
         st.subheader("Providers")
         selected: list[str] = []
@@ -97,13 +161,7 @@ def _configuration_form():
             with st.expander(provider.name, expanded=False):
                 config: dict[str, str] = {}
                 for field in provider.fields:
-                    config[field.key] = st.text_input(
-                        field.label,
-                        value=field.default,
-                        type="password" if field.secret else "default",
-                        help=field.help,
-                        key=f"config_{provider.id}_{field.key}",
-                    )
+                    config[field.key] = _render_provider_field(provider.id, field)
                 configs[provider.id] = config
 
         submitted = st.form_submit_button("Run test", type="primary", use_container_width=True)
@@ -114,6 +172,7 @@ def _configuration_form():
         "market": MARKETS[market_label],
         "language": LANGUAGES[language_label],
         "timeout_seconds": timeout_seconds,
+        "debug_mode": debug_mode,
     }
     return submitted, values, selected, configs
 
@@ -135,7 +194,10 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         targets=[Target(values["target"].strip(), values["match_mode"])],
         market=values["market"],
         language=values["language"],
-        provider_options={"timeout_seconds": values["timeout_seconds"]},
+        provider_options={
+            "timeout_seconds": values["timeout_seconds"],
+            "debug_mode": values["debug_mode"],
+        },
     )
     jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
     st.session_state["grounding_request"] = request
@@ -180,8 +242,11 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     st.dataframe(_matrix_data(runs), use_container_width=True, hide_index=True)
 
     st.subheader("Provider evidence")
+    debug_mode = _debug_mode_enabled(request)
+    if debug_mode:
+        st.caption("Debug mode is on — each provider includes an expanded debug trace.")
     for run in runs:
-        _provider_details(run)
+        _provider_details(run, debug_mode=debug_mode)
 
     st.subheader("Export")
     include_raw = st.checkbox("Include sanitised raw provider responses in JSON")
@@ -224,7 +289,7 @@ def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     )
 
 
-def _provider_details(run: GroundingRun) -> None:
+def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
     with st.expander(run.provider_name):
         st.markdown("#### Summary")
         summary = {
@@ -363,7 +428,12 @@ def _provider_details(run: GroundingRun) -> None:
                 st.components.v1.html(markup, height=80, scrolling=False)
         with st.expander("Provider metadata"):
             st.json(run.metadata)
-        if st.checkbox("Show sanitised raw response", key=f"raw_{run.run_id}_{run.provider_id}"):
+        if debug_mode:
+            _render_debug_panel(run, expanded=True)
+        elif st.checkbox(
+            "Show sanitised raw response",
+            key=f"raw_{run.run_id}_{run.provider_id}",
+        ):
             from core.export import redact_secrets
 
             st.json(redact_secrets(run.raw_response))

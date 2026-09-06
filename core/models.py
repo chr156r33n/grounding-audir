@@ -106,6 +106,7 @@ class ProviderField:
     required: bool = True
     default: str = ""
     help: str | None = None
+    choices: tuple[str, ...] | None = None
 
 
 @dataclass

@@ -51,11 +51,21 @@ class GroundingProvider(ABC):
     capabilities = ProviderCapabilities()
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
-        return [
+        errors = [
             f"{item.label} is required."
             for item in self.fields
             if item.required and not str(config.get(item.key, "")).strip()
         ]
+        for item in self.fields:
+            if not item.choices:
+                continue
+            value = str(config.get(item.key, "")).strip()
+            if value and value not in item.choices:
+                errors.append(
+                    f"{item.label} must be one of the documented options: "
+                    f"{', '.join(item.choices)}."
+                )
+        return errors
 
     @abstractmethod
     def run(self, request: GroundingRequest, config: dict[str, Any]) -> GroundingRun:

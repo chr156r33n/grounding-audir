@@ -6,7 +6,16 @@ from typing import Any
 from core.enums import ObservationState
 from core.models import GeneratedQuery, GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
+from core.debug import (
+    DebugTrace,
+    build_run_debug_context,
+    debug_mode_enabled,
+    gemini_request_body,
+    record_api_request,
+    record_exception_debug,
+)
 from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
+from .model_catalog import GEMINI_GOOGLE_SEARCH, model_field
 
 
 class GeminiProvider(GroundingProvider):
@@ -16,7 +25,7 @@ class GeminiProvider(GroundingProvider):
     api_version = "v1"
     fields = (
         ProviderField("api_key", "Gemini API key", secret=True),
-        ProviderField("model", "Model", required=True, default=default_model),
+        model_field(GEMINI_GOOGLE_SEARCH),
     )
     capabilities = ProviderCapabilities(
         generated_queries=True,
@@ -31,20 +40,44 @@ class GeminiProvider(GroundingProvider):
     def run(self, request: GroundingRequest, config: dict[str, Any]):
         from google import genai
 
+        debug = debug_mode_enabled(config, request)
+        trace = DebugTrace(self.id, debug)
         started = perf_counter()
         model = config.get("model") or self.default_model
-        client = genai.Client(
-            api_key=config["api_key"],
-            http_options={"api_version": self.api_version},
-        )
-        response = client.interactions.create(
-            model=model,
-            input=CANONICAL_INSTRUCTION.format(query=request.input_phrase),
-            tools=[{"type": "google_search", "search_types": ["web_search"]}],
-        )
+        request_body = gemini_request_body(model, request)
+        trace.event("validated_config", model=model)
+        trace.event("request_prepared", request_body=request_body)
+        try:
+            client = genai.Client(
+                api_key=config["api_key"],
+                http_options={"api_version": self.api_version},
+            )
+            trace.event("http_request_started")
+            response = client.interactions.create(**request_body)
+            trace.event("http_request_completed")
+        except Exception as exc:
+            trace.event("http_request_failed")
+            run = self.new_run(request, model)
+            run.metadata["debug"] = {
+                "context": build_run_debug_context(self.id, request, config),
+                "trace": trace.events,
+            }
+            record_exception_debug(run, exc)
+            raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)
         run.finished_at = utc_now()
+        if debug:
+            run.metadata["debug"] = {
+                "context": build_run_debug_context(self.id, request, config),
+            }
+            record_api_request(
+                run,
+                api="google.genai.interactions",
+                operation="interactions.create",
+                request_body=request_body,
+            )
+            trace.attach(run)
         return run
 
     def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):

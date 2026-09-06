@@ -5,18 +5,21 @@ from typing import Any
 
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
+from core.diagnostics import attach_observation_diagnostics
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
+from .model_catalog import MICROSOFT_BING_GROUNDING, model_field
 
 
 class MicrosoftBingProvider(GroundingProvider):
     id = "microsoft_bing"
     name = "Microsoft Grounding with Bing Search"
     default_model = "gpt-4.1-mini"
+    timeout_seconds = 120.0
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),
-        ProviderField("model", "Model deployment", default=default_model),
+        model_field(MICROSOFT_BING_GROUNDING, label="Model deployment"),
         ProviderField(
             "connection_name",
             "Bing grounding project connection name",

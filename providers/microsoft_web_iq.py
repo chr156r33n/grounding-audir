@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from core.debug import DebugTrace, build_run_debug_context, debug_mode_enabled, record_api_request
 from core.diagnostics import attach_observation_diagnostics
 from core.enums import ObservationState, ProviderType
 from core.models import (
@@ -51,19 +52,51 @@ class MicrosoftWebIQProvider(GroundingProvider):
         from webiq import WebIQClient
         from webiq.types import ContentFormat
 
+        debug = debug_mode_enabled(config, request)
+        trace = DebugTrace(self.id, debug)
         started = perf_counter()
         language, region = _locale(request)
-        with WebIQClient(api_key=config["api_key"]) as client:
-            response = client.web.search(
-                request.input_phrase,
-                max_results=max(1, min(int(config.get("max_results") or 10), 50)),
-                language=language,
-                region=region,
-                content_format=ContentFormat.passage,
-            )
+        max_results = max(1, min(int(config.get("max_results") or 10), 50))
+        request_body = {
+            "query": request.input_phrase,
+            "max_results": max_results,
+            "language": language,
+            "region": region,
+            "content_format": "passage",
+        }
+        trace.event("request_prepared", request_body=request_body)
+        try:
+            with WebIQClient(api_key=config["api_key"]) as client:
+                trace.event("http_request_started")
+                response = client.web.search(
+                    request.input_phrase,
+                    max_results=max_results,
+                    language=language,
+                    region=region,
+                    content_format=ContentFormat.passage,
+                )
+                trace.event("http_request_completed")
+        except Exception as exc:
+            trace.event("http_request_failed")
+            if debug:
+                run = self.new_run(request)
+                run.metadata["debug"] = {
+                    "context": build_run_debug_context(self.id, request, config),
+                    "trace": trace.events,
+                }
+            raise
         run = self.parse_response(response, request)
         run.latency_ms = round((perf_counter() - started) * 1000)
         run.finished_at = utc_now()
+        if debug:
+            run.metadata["debug"] = {"context": build_run_debug_context(self.id, request, config)}
+            record_api_request(
+                run,
+                api="webiq.web",
+                operation="web.search",
+                request_body=request_body,
+            )
+            trace.attach(run)
         return run
 
     def parse_response(self, raw_response: Any, request: GroundingRequest, model: str | None = None):

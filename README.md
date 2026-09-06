@@ -16,18 +16,19 @@ streamlit run app.py
 ```
 
 Enter a query, target, match mode, and credentials in the app, then explicitly
-select **Run test**. API calls are concurrent and each provider has a 45-second
-application timeout. Provider API costs may apply.
+select **Run test**. API calls are concurrent. The default per-provider timeout is
+90 seconds (configurable in the form; OpenAI and other web-search providers use
+at least 120 seconds when needed). Provider API costs may apply.
 
 ## Provider configuration
 
 | Provider | Configuration | Retrieval observability | Citation observability |
 |---|---|---|---|
-| Gemini + Google Search | Gemini API key; overridable model | Unknown: Interactions does not expose raw SERP rows | URL citation annotations |
-| Microsoft Foundry Web Search | Foundry project endpoint, model deployment, Azure identity/token | Complete consulted `sources` requested through Responses; unknown if omitted | Inline URL citations |
+| Gemini + Google Search | Gemini API key; model from documented Interactions list | Unknown: Interactions does not expose raw SERP rows | URL citation annotations |
+| Microsoft Foundry Web Search | Foundry project endpoint, model deployment from documented list, Azure identity/token | Complete consulted `sources` requested through Responses; unknown if omitted | Inline URL citations |
 | Microsoft Web IQ | Web IQ API key from [webiq.microsoft.ai](https://webiq.microsoft.ai); optional max results (1–50) | Ranked `webResults` with passage-level content | N/A: retrieval API, not a citation layer |
-| Microsoft Grounding with Bing Search | Foundry endpoint, deployment, Bing grounding connection name or resource ID, Azure identity/token | Unknown: raw grounding output is withheld | URL citations and generated-query events where exposed |
-| OpenAI Web Search | OpenAI API key; overridable model | Consulted `sources` requested through the Responses API | Inline URL citations |
+| Microsoft Grounding with Bing Search | Foundry endpoint, deployment from documented list, Bing grounding connection name or resource ID, Azure identity/token | Unknown: raw grounding output is withheld | URL citations and generated-query events where exposed |
+| OpenAI Web Search | OpenAI API key; model from documented Responses web_search list | Consulted `sources` requested through the Responses API | Inline URL citations |
 
 For Microsoft providers, leave the optional access-token field empty to use
 the Azure `DefaultAzureCredential` chain (for example, an existing Azure CLI
@@ -37,10 +38,10 @@ explicit Bing provider attaches its tool to a short-lived prompt-agent version,
 so that identity also needs permission to create and delete agent versions. The
 app deletes that version after each Bing request and reports cleanup status.
 
-Model and API surfaces were checked on 5 September 2026, but they change. The
-current defaults are Gemini 3.6 Flash, Microsoft `gpt-5.5`/`gpt-4.1-mini`,
-and OpenAI GPT-5.5; every model field is user-overridable. Check current
-provider documentation before relying on them:
+Model dropdowns are populated from provider documentation checked on 6 September 2026
+(see `providers/model_catalog.py` for source URLs). Enable **Debug mode** in the run
+form to capture per-provider request payloads, execution traces, response summaries,
+and sanitised raw responses.
 
 - [Gemini Interactions Google Search](https://ai.google.dev/gemini-api/docs/interactions/google-search)
 - [Gemini Google Search grounding](https://ai.google.dev/gemini-api/docs/google-search)

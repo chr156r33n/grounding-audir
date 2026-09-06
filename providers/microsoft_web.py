@@ -5,6 +5,7 @@ from typing import Any
 
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
+from core.diagnostics import attach_observation_diagnostics
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
 
@@ -91,7 +92,9 @@ class MicrosoftWebProvider(GroundingProvider):
         )
         run.metadata["market_applied"] = bool(_market_country(request.market))
         run.metadata["language_applied"] = False
-        return run
+        run.metadata["sources_requested"] = True
+        run.metadata["include_fields"] = ["web_search_call.action.sources"]
+        return attach_observation_diagnostics(run)
 
 
 def _market_country(market: str | None) -> str | None:

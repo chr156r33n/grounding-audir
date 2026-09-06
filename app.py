@@ -7,6 +7,7 @@ import streamlit as st
 
 from core.enums import MatchMode, ObservationState
 from core.execution import execute_providers
+from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, Target
@@ -213,19 +214,43 @@ def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
 def _provider_details(run: GroundingRun) -> None:
     with st.expander(run.provider_name):
         st.markdown("#### Summary")
-        st.write(
-            {
-                "status": run.status.value,
-                "model": run.model,
-                "api_version": run.api_version,
-                "latency_ms": run.latency_ms,
-                "search_performed": STATE_LABELS[run.search_performed],
-                "target_retrieved": STATE_LABELS[run.target_retrieved],
-                "target_cited": STATE_LABELS[run.target_cited],
-            }
-        )
+        summary = {
+            "status": run.status.value,
+            "model": run.model,
+            "api_version": run.api_version,
+            "latency_ms": run.latency_ms,
+            "search_performed": STATE_LABELS[run.search_performed],
+            "target_retrieved": STATE_LABELS[run.target_retrieved],
+            "target_cited": STATE_LABELS[run.target_cited],
+        }
+        st.write(summary)
         if run.error:
             st.error(run.error.safe_message)
+
+        state_notes = run.metadata.get("state_notes") or build_state_notes(run)
+        unknown_fields = unknown_observation_fields(run)
+        if unknown_fields or any(
+            getattr(run, field) in {ObservationState.NO, ObservationState.NOT_APPLICABLE}
+            for field, _ in (
+                ("search_performed", "Search performed"),
+                ("target_retrieved", "Target retrieved"),
+                ("target_cited", "Target cited"),
+            )
+        ):
+            st.markdown("#### Why these states?")
+            if unknown_fields:
+                st.warning(
+                    "One or more observation states are UNKNOWN. UNKNOWN does not mean NO — "
+                    "it means the provider response did not expose enough evidence to decide."
+                )
+            for field, label in (
+                ("search_performed", "Search performed"),
+                ("target_retrieved", "Target retrieved"),
+                ("target_cited", "Target cited"),
+            ):
+                note = state_notes.get(field)
+                if note:
+                    st.info(f"**{label} ({STATE_LABELS[getattr(run, field)]})** — {note}")
 
         st.markdown("#### Generated queries")
         if run.generated_queries:
@@ -268,7 +293,8 @@ def _provider_details(run: GroundingRun) -> None:
             )
         else:
             st.info(
-                run.metadata.get("retrieval_note")
+                state_notes.get("target_retrieved")
+                or run.metadata.get("retrieval_note")
                 or "No retrieved-source list was exposed by this provider/API."
             )
 

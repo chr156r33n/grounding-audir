@@ -139,6 +139,25 @@
       }
     ]
   },
+  "microsoft_web_iq": {
+    "webResults": [
+      {
+        "title": "Four Seasons Hotel Hong Kong",
+        "url": "https://www.fourseasons.com/hongkong/",
+        "content": "Four Seasons Hotel Hong Kong overlooks Victoria Harbour with luxury rooms and dining.",
+        "contentTier": "passage",
+        "language": "en"
+      },
+      {
+        "title": "Other luxury hotels",
+        "url": "https://example.org/hotels",
+        "content": "A roundup of boutique hotels in Hong Kong.",
+        "contentTier": "passage",
+        "language": "en"
+      }
+    ],
+    "traceId": "fixture-trace"
+  },
   "microsoft_bing": {
     "output": [
       {

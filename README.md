@@ -4,6 +4,11 @@ A local-first Streamlit research tool for testing whether AI web-grounding
 providers expose or cite a target domain for a query. It compares observable
 evidence; it is **not** a conventional search-rank tracker.
 
+This repository also contains a separate Cloudflare Workers edition in
+[`cloudflare/`](cloudflare/README.md). It has its own edge-native UI, API, and
+GitHub deployment workflow. The Worker and Streamlit deployments are parallel;
+deploying one does not replace or remove the other.
+
 ## Run locally
 
 Python 3.11+ is recommended.

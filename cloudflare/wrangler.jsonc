@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "grounding-source-observatory",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "OPENAI_MODEL": "gpt-5.5",
+    "DEEPSEEK_MODEL": "deepseek-v4-flash",
+    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "GEMINI_MODEL": "gemini-3.6-flash",
+    "GEMINI_API_URL": "https://generativelanguage.googleapis.com/v1beta/interactions",
+    "FOUNDRY_MODEL": "gpt-5-mini",
+    "FOUNDRY_SEARCH_CONTEXT_SIZE": "medium",
+    "WEBIQ_API_URL": "https://api.microsoft.ai/v3/search/web",
+    "WEBIQ_MAX_RESULTS": "10"
+  }
+}

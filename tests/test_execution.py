@@ -47,3 +47,24 @@ def test_provider_has_independent_timeout():
     }
     assert runs["good"].status is RunStatus.COMPLETE
     assert runs["slow"].status is RunStatus.TIMED_OUT
+
+
+def test_debug_mode_captures_failure_context_and_redacts_secrets():
+    request = GroundingRequest(
+        "run",
+        "query",
+        [Target("example.com")],
+        provider_options={"debug_mode": True},
+    )
+    run = next(
+        execute_providers(
+            request,
+            [(FakeProvider("bad", "fail"), {"api_key": "do-not-display"})],
+            max_retries=0,
+        )
+    )
+
+    assert run.status is RunStatus.FAILED
+    assert run.metadata["debug"]["context"]["config"]["api_key"] == "[REDACTED]"
+    assert run.metadata["debug"]["exception"]["type"] == "RuntimeError"
+    assert run.metadata["debug"]["execution_trace"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import pandas as pd
@@ -10,7 +11,8 @@ from core.execution import execute_providers
 from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
-from core.models import GroundingRequest, GroundingRun, Target
+from core.models import GroundingRequest, GroundingRun, ProviderField, Target
+from core.query_discovery import QueryDiscoveryResult, discover_queries
 from providers.registry import PROVIDERS
 
 st.set_page_config(page_title="Grounding Source Observatory", page_icon="🔭", layout="wide")
@@ -44,15 +46,86 @@ def main() -> None:
     )
     _methodology_help()
 
-    submitted, values, selected, configs = _configuration_form()
-    if submitted:
+    action, values, selected, configs = _configuration_form()
+    if action == "discover":
+        _start_query_discovery(values, configs)
+    elif action == "run":
         _start_run(values, selected, configs)
 
-    if st.session_state.get("grounding_runs"):
+    runs = st.session_state.get("grounding_runs") or []
+    discovery = st.session_state.get("query_discovery")
+    if runs:
         _render_results(
             st.session_state["grounding_request"],
-            st.session_state["grounding_runs"],
+            runs,
         )
+    elif discovery:
+        st.divider()
+        st.header("Results")
+        _render_query_discovery(discovery)
+
+
+def _render_provider_field(provider_id: str, field: ProviderField) -> str:
+    key = f"config_{provider_id}_{field.key}"
+    if field.choices:
+        options = list(field.choices)
+        default_index = options.index(field.default) if field.default in options else 0
+        return st.selectbox(
+            field.label,
+            options,
+            index=default_index,
+            help=field.help,
+            key=key,
+        )
+    return st.text_input(
+        field.label,
+        value=field.default,
+        type="password" if field.secret else "default",
+        help=field.help,
+        key=key,
+    )
+
+
+def _debug_mode_enabled(request: GroundingRequest | None) -> bool:
+    return bool(request and request.provider_options.get("debug_mode"))
+
+
+def _render_debug_panel(run: GroundingRun, *, expanded: bool = False) -> None:
+    debug = run.metadata.get("debug") or {}
+    if not debug and run.raw_response is None:
+        return
+    with st.expander("Debug trace", expanded=expanded):
+        execution_trace = debug.get("execution_trace") or []
+        if execution_trace:
+            st.markdown("**Execution timeline**")
+            st.dataframe(execution_trace, hide_index=True, use_container_width=True)
+        trace = debug.get("trace") or []
+        if trace:
+            st.markdown("**Provider request timeline**")
+            st.dataframe(trace, hide_index=True, use_container_width=True)
+        if debug.get("context"):
+            st.markdown("**Run context**")
+            st.json(debug["context"])
+        if debug.get("request_body"):
+            st.markdown("**API request body (sanitised)**")
+            st.json(debug["request_body"])
+        if debug.get("requests"):
+            st.markdown("**API requests (sanitised)**")
+            st.json(debug["requests"])
+        if debug.get("response_summary"):
+            st.markdown("**Response summary**")
+            st.json(debug["response_summary"])
+        if debug.get("exception"):
+            st.markdown("**Exception details**")
+            st.json(debug["exception"])
+        if debug.get("api"):
+            st.caption(f"API: {debug.get('api')} · operation: {debug.get('operation')}")
+        if debug.get("notes"):
+            st.caption(debug["notes"])
+        from core.export import redact_secrets
+
+        st.markdown("**Raw provider response (sanitised)**")
+        st.json(redact_secrets(run.raw_response))
 
 
 def _configuration_form():
@@ -61,6 +134,23 @@ def _configuration_form():
         query = st.text_input(
             "Grounding/search phrase",
             placeholder="best luxury family hotels in Hong Kong",
+            key="input_query",
+        )
+        discovery_url = st.text_input(
+            "Optional source URL for query discovery",
+            placeholder="https://example.com/page-to-test",
+            help=(
+                "On Run test, fetch this public HTML page once, extract high-signal DOM "
+                "chunks, and ask the configured OpenAI and Gemini models for likely "
+                "grounding queries. This does not automatically run those suggestions."
+            ),
+        )
+        discovery_count = st.slider(
+            "Query suggestions",
+            min_value=3,
+            max_value=10,
+            value=6,
+            help="Maximum number of merged suggestions to keep across Gemini and OpenAI.",
         )
         target = st.text_input("Target domain, hostname, or URL prefix", placeholder="fourseasons.com")
         col1, col2, col3 = st.columns(3)
@@ -70,6 +160,25 @@ def _configuration_form():
             market_label = st.selectbox("Country / market", list(MARKETS))
         with col3:
             language_label = st.selectbox("Language", list(LANGUAGES))
+        timeout_seconds = st.slider(
+            "Per-provider timeout (seconds)",
+            min_value=30,
+            max_value=180,
+            value=90,
+            step=15,
+            help=(
+                "Each provider runs on its own timer. Web search calls often need 60–120 seconds, "
+                "especially OpenAI with consulted sources."
+            ),
+        )
+        debug_mode = st.checkbox(
+            "Debug mode",
+            value=False,
+            help=(
+                "Capture request payloads, execution traces, response summaries, and raw provider "
+                "responses for every provider run. Secrets are still redacted."
+            ),
+        )
 
         st.subheader("Providers")
         selected: list[str] = []
@@ -86,24 +195,64 @@ def _configuration_form():
             with st.expander(provider.name, expanded=False):
                 config: dict[str, str] = {}
                 for field in provider.fields:
-                    config[field.key] = st.text_input(
-                        field.label,
-                        value=field.default,
-                        type="password" if field.secret else "default",
-                        help=field.help,
-                        key=f"config_{provider.id}_{field.key}",
-                    )
+                    config[field.key] = _render_provider_field(provider.id, field)
                 configs[provider.id] = config
 
-        submitted = st.form_submit_button("Run test", type="primary", use_container_width=True)
+        discovery_col, run_col = st.columns(2)
+        with discovery_col:
+            discover_submitted = st.form_submit_button(
+                "Discover queries from URL",
+                use_container_width=True,
+            )
+        with run_col:
+            run_submitted = st.form_submit_button(
+                "Run test",
+                type="primary",
+                use_container_width=True,
+            )
     values = {
         "query": query,
         "target": target,
         "match_mode": MATCH_LABELS[match_label],
         "market": MARKETS[market_label],
         "language": LANGUAGES[language_label],
+        "timeout_seconds": timeout_seconds,
+        "debug_mode": debug_mode,
+        "discovery_url": discovery_url.strip(),
+        "discovery_count": discovery_count,
     }
-    return submitted, values, selected, configs
+    action = "discover" if discover_submitted else "run" if run_submitted else None
+    return action, values, selected, configs
+
+
+def _start_query_discovery(
+    values,
+    configs: dict[str, dict[str, str]],
+) -> QueryDiscoveryResult | None:
+    if not values["discovery_url"]:
+        st.error("Enter a public source URL to discover queries.")
+        return None
+    status = st.empty()
+    status.info("⟳ Query discovery — fetching and analysing page")
+    discovery = discover_queries(
+        values["discovery_url"],
+        openai_config=configs.get("openai_web"),
+        gemini_config=configs.get("gemini"),
+        count=values["discovery_count"],
+        debug=values["debug_mode"],
+    )
+    st.session_state["query_discovery"] = discovery
+    st.session_state["grounding_runs"] = []
+    st.session_state.pop("grounding_request", None)
+    if discovery.candidates:
+        status.success(
+            f"✓ Query discovery — {len(discovery.candidates)} suggestions generated"
+        )
+    else:
+        status.error(
+            f"Query discovery — {discovery.error or 'No suggestions were generated.'}"
+        )
+    return discovery
 
 
 def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) -> None:
@@ -123,12 +272,22 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         targets=[Target(values["target"].strip(), values["match_mode"])],
         market=values["market"],
         language=values["language"],
+        provider_options={
+            "timeout_seconds": values["timeout_seconds"],
+            "debug_mode": values["debug_mode"],
+        },
     )
     jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
     st.session_state["grounding_request"] = request
     st.session_state["grounding_runs"] = []
+    st.session_state["query_discovery"] = None
 
     st.subheader("Running test")
+    if values["discovery_url"]:
+        _start_query_discovery(values, configs)
+        st.session_state["grounding_request"] = request
+        st.session_state["grounding_runs"] = []
+
     statuses = {
         provider_id: st.empty()
         for provider_id in selected
@@ -157,6 +316,9 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     st.divider()
     st.header("Results")
     st.caption(f"Run ID: {request.run_id}")
+    discovery = st.session_state.get("query_discovery")
+    if discovery:
+        _render_query_discovery(discovery)
     st.subheader(f"Target citation summary — {request.targets[0].value}")
     columns = st.columns(min(4, len(runs)))
     for index, run in enumerate(runs):
@@ -167,8 +329,11 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     st.dataframe(_matrix_data(runs), use_container_width=True, hide_index=True)
 
     st.subheader("Provider evidence")
+    debug_mode = _debug_mode_enabled(request)
+    if debug_mode:
+        st.caption("Debug mode is on — each provider includes an expanded debug trace.")
     for run in runs:
-        _provider_details(run)
+        _provider_details(run, debug_mode=debug_mode)
 
     st.subheader("Export")
     include_raw = st.checkbox("Include sanitised raw provider responses in JSON")
@@ -191,6 +356,148 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
         )
 
 
+def _use_discovered_query(query: str) -> None:
+    st.session_state["input_query"] = query
+
+
+def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
+    st.subheader("URL query discovery")
+    if discovery.error:
+        st.warning(discovery.error)
+    if discovery.evidence:
+        evidence = discovery.evidence
+        st.caption(
+            f"Fetched {evidence.final_url} · {evidence.downloaded_bytes:,} bytes · "
+            f"{len(evidence.chunks)} DOM chunks selected"
+        )
+    if discovery.candidates:
+        st.dataframe(
+            [
+                {
+                    "Query": item.query,
+                    "Why this page fits": item.rationale,
+                    "DOM evidence": item.evidence,
+                    "Generated by": ", ".join(item.generators),
+                }
+                for item in discovery.candidates
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Suggestions are hypotheses, not ranking guarantees. Choose one to place it "
+            "in the query field, then run the test again."
+        )
+        button_columns = st.columns(2)
+        for index, item in enumerate(discovery.candidates):
+            with button_columns[index % 2]:
+                st.button(
+                    f"Use query {index + 1}: {item.query}",
+                    key=f"use_discovered_{index}_{hash(item.query)}",
+                    on_click=_use_discovered_query,
+                    args=(item.query,),
+                    use_container_width=True,
+                )
+
+    with st.expander("Page evidence"):
+        if not discovery.evidence:
+            st.info("No page evidence was extracted.")
+        else:
+            evidence = discovery.evidence
+            st.write(
+                {
+                    "requested_url": evidence.requested_url,
+                    "final_url": evidence.final_url,
+                    "canonical_url": evidence.canonical_url,
+                    "title": evidence.title,
+                    "description": evidence.description,
+                    "language": evidence.language,
+                    "http_status": evidence.http_status,
+                    "content_type": evidence.content_type,
+                    "downloaded_bytes": evidence.downloaded_bytes,
+                    "redirects": evidence.redirects,
+                }
+            )
+            st.dataframe(
+                [
+                    {"Kind": chunk.kind, "Score": chunk.score, "Text": chunk.text}
+                    for chunk in evidence.chunks
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    st.markdown("#### Query generators")
+    if discovery.generators:
+        st.dataframe(
+            [
+                {
+                    "Provider": item.provider_name,
+                    "Model": item.model,
+                    "Status": item.status,
+                    "Suggestions": len(item.queries),
+                    "Latency (ms)": item.latency_ms,
+                    "Error": item.error,
+                }
+                for item in discovery.generators
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("No query-generation API was called.")
+
+    st.download_button(
+        "Download query suggestions JSON",
+        json.dumps(
+            discovery.to_dict(include_raw=False),
+            indent=2,
+            ensure_ascii=False,
+        ),
+        file_name="query-discovery.json",
+        mime="application/json",
+    )
+
+    if discovery.debug_mode:
+        with st.expander("Query discovery debug", expanded=True):
+            if discovery.debug:
+                st.markdown("**Discovery diagnostics**")
+                st.json(discovery.debug)
+            if discovery.evidence:
+                st.markdown("**Fetch diagnostics**")
+                st.json(
+                    {
+                        "requested_url": discovery.evidence.requested_url,
+                        "final_url": discovery.evidence.final_url,
+                        "redirects": discovery.evidence.redirects,
+                        "resolved_addresses": discovery.evidence.resolved_addresses,
+                        "request_headers": discovery.evidence.request_headers,
+                        "response_headers": discovery.evidence.response_headers,
+                        "http_status": discovery.evidence.http_status,
+                        "content_type": discovery.evidence.content_type,
+                        "downloaded_bytes": discovery.evidence.downloaded_bytes,
+                    }
+                )
+            for generator in discovery.generators:
+                st.markdown(f"**{generator.provider_name} / {generator.model}**")
+                st.json(generator.debug)
+                if generator.raw_response is not None:
+                    from core.export import redact_secrets
+
+                    st.markdown("Raw response (sanitised)")
+                    st.json(redact_secrets(generator.raw_response))
+            st.download_button(
+                "Download query discovery debug JSON",
+                json.dumps(
+                    discovery.to_dict(include_raw=True),
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                file_name="query-discovery-debug.json",
+                mime="application/json",
+            )
+
+
 def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -211,7 +518,7 @@ def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     )
 
 
-def _provider_details(run: GroundingRun) -> None:
+def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
     with st.expander(run.provider_name):
         st.markdown("#### Summary")
         summary = {
@@ -226,6 +533,15 @@ def _provider_details(run: GroundingRun) -> None:
         st.write(summary)
         if run.error:
             st.error(run.error.safe_message)
+            if run.status.value == "timed_out":
+                timeout = run.metadata.get("timeout_seconds")
+                retries = run.metadata.get("retry_count")
+                st.caption(
+                    f"Timed out after {run.latency_ms} ms"
+                    + (f" (configured limit: {timeout:g}s)" if timeout else "")
+                    + (f"; retries attempted: {retries}" if retries else "")
+                    + ". Web search providers often need 90–120 seconds."
+                )
 
         state_notes = run.metadata.get("state_notes") or build_state_notes(run)
         unknown_fields = unknown_observation_fields(run)
@@ -341,7 +657,12 @@ def _provider_details(run: GroundingRun) -> None:
                 st.components.v1.html(markup, height=80, scrolling=False)
         with st.expander("Provider metadata"):
             st.json(run.metadata)
-        if st.checkbox("Show sanitised raw response", key=f"raw_{run.run_id}_{run.provider_id}"):
+        if debug_mode:
+            _render_debug_panel(run, expanded=True)
+        elif st.checkbox(
+            "Show sanitised raw response",
+            key=f"raw_{run.run_id}_{run.provider_id}",
+        ):
             from core.export import redact_secrets
 
             st.json(redact_secrets(run.raw_response))

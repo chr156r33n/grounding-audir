@@ -20,6 +20,20 @@ def build_state_notes(run: GroundingRun) -> dict[str, str]:
     notes: dict[str, str] = {}
     if run.error or run.status != RunStatus.COMPLETE:
         failure = run.error.safe_message if run.error else f"Run status is {run.status.value}."
+        if run.status is RunStatus.TIMED_OUT:
+            timeout = run.metadata.get("timeout_seconds")
+            retry_count = run.metadata.get("retry_count", 0)
+            timeout_hint = (
+                f"Application deadline: {timeout:g}s."
+                if isinstance(timeout, (int, float))
+                else "Application deadline reached."
+            )
+            retry_hint = (
+                f" Retry attempts before timeout: {retry_count}."
+                if retry_count
+                else ""
+            )
+            failure = f"{failure} {timeout_hint}{retry_hint}"
         for field, _label in _OBSERVATION_FIELDS:
             if getattr(run, field) == ObservationState.UNKNOWN:
                 notes[field] = (

@@ -24,6 +24,7 @@ _AZURE_TOKEN_COMMAND = (
     "az account get-access-token --scope https://ai.azure.com/.default "
     "--query accessToken -o tsv"
 )
+FOUNDRY_ACCESS_TOKEN_COMMAND = _AZURE_TOKEN_COMMAND
 
 
 def extract_provider_error_details(exc: Exception) -> dict[str, Any]:

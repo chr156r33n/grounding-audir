@@ -680,6 +680,13 @@ def _methodology_help() -> None:
             """
 - Citation presence is not the same as retrieval presence.
 - **UNKNOWN does not mean NO**: some providers do not expose their retrieved result set.
+- **Target retrieved** uses four states, not two:
+  - **YES** — the provider returned a consulted-source list and your target domain appears in it.
+  - **NO** — the provider returned a complete consulted-source list and your target is absent.
+  - **UNKNOWN** — search may have run, but the API did not expose enough retrieval evidence to
+    prove YES or NO (for example Gemini citations without a SERP list, or Bing without raw
+    grounding output).
+  - **N/A** — retrieval is not applicable for that provider type.
 - Source, retrieval, and citation order must not be treated as conventional organic rank.
 - Provider and model choices can change results, and grounding runs are inherently variable.
 """

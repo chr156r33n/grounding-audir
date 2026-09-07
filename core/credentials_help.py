@@ -61,6 +61,28 @@ exports, logs, or Git — values live only in this Streamlit session.
 """,
     ),
     CredentialSection(
+        "deepseek_web",
+        "DeepSeek Web Search",
+        """
+**Credential type:** DeepSeek API key.
+
+**Where to get it**
+1. Sign in at [platform.deepseek.com](https://platform.deepseek.com/) (or the DeepSeek API console).
+2. Create an API key with access to the **Responses API** and the built-in `web_search` tool.
+3. Paste into **DeepSeek API key**.
+
+**Model field:** choose `deepseek-v4-flash` (fast) or `deepseek-v4-pro` from the dropdown.
+
+**Important:** DeepSeek web search uses the separate **Responses API** (`POST /responses`), not the
+OpenAI-compatible `/chat/completions` endpoint. This app calls Responses with `tool_choice: required`
+and the built-in `web_search` tool.
+
+**Works on Community Cloud:** yes — static API keys are fine.
+
+**Docs:** [DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
+""",
+    ),
+    CredentialSection(
         "gemini",
         "Gemini + Google Search",
         """

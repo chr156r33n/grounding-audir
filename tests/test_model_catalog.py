@@ -1,5 +1,6 @@
 from providers.gemini import GeminiProvider
 from providers.model_catalog import (
+    DEEPSEEK_WEB_SEARCH,
     GEMINI_GOOGLE_SEARCH,
     MICROSOFT_BING_GROUNDING,
     OPENAI_WEB_SEARCH,
@@ -23,7 +24,10 @@ def test_provider_rejects_undocumented_model():
 
 
 def test_catalog_defaults_match_provider_defaults():
+    from providers.deepseek_web import DeepSeekWebProvider
+
     assert GeminiProvider.default_model == GEMINI_GOOGLE_SEARCH.default
+    assert DeepSeekWebProvider.default_model == DEEPSEEK_WEB_SEARCH.default
     assert OPENAI_WEB_SEARCH.default == "gpt-5.5"
     assert MICROSOFT_BING_GROUNDING.default == "gpt-4.1-mini"
 

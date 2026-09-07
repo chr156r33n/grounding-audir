@@ -23,8 +23,27 @@ class StaticTokenCredential:
         return AccessToken(self._token, 2**31 - 1)
 
 
+def normalize_azure_token(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value.lower().startswith("bearer "):
+        value = value[7:].strip()
+    if value.startswith("{") and value.endswith("}"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("accessToken", "access_token", "token"):
+                token = parsed.get(key)
+                if isinstance(token, str) and token.strip():
+                    return token.strip()
+    return value.splitlines()[0].strip().strip('"').strip("'")
+
+
 def azure_credential(config: dict[str, Any]):
-    token = str(config.get("azure_token", "")).strip()
+    token = normalize_azure_token(str(config.get("azure_token", "")))
     if token:
         return StaticTokenCredential(token)
     from azure.identity import DefaultAzureCredential

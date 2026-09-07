@@ -21,7 +21,7 @@ _CREDENTIAL_UNAVAILABLE = re.compile(
     re.I,
 )
 _AZURE_TOKEN_COMMAND = (
-    "az account get-access-token --resource https://cognitiveservices.azure.com "
+    "az account get-access-token --scope https://ai.azure.com/.default "
     "--query accessToken -o tsv"
 )
 
@@ -124,14 +124,22 @@ def auth_error_message(
         base = (
             f"Azure rejected the request with HTTP 403 (forbidden)"
             + (f": {api_message}" if api_message else ".")
-            + " Your signed-in identity may lack permission on this Foundry project."
+            + " Your token was accepted, but this identity lacks permission on the Foundry "
+            "project or Bing connection."
         )
     elif status == 401:
         base = (
             f"Azure rejected the request with HTTP 401 (unauthorized)"
             + (f": {api_message}" if api_message else ".")
-            + " The access token may be missing, expired, or for the wrong resource."
+            + " The access token may be missing, expired, pasted incorrectly, or issued for the "
+            "wrong scope."
         )
+        if token_configured:
+            base = (
+                f"{base} Foundry requires a token from "
+                f"`{_AZURE_TOKEN_COMMAND}`, not the older "
+                "cognitiveservices.azure.com scope."
+            )
     else:
         base = "Authentication failed for the configured Azure identity."
         if api_message:
@@ -159,18 +167,20 @@ def auth_configuration_hint(
         )
     else:
         hints.append(
-            "The pasted Azure access token may be expired. Generate a fresh token with: "
-            f"`{_AZURE_TOKEN_COMMAND}`."
+            "Generate a fresh Foundry token in Azure Cloud Shell with: "
+            f"`{_AZURE_TOKEN_COMMAND}`. Paste only the token string (not JSON). "
+            "If you previously used the cognitiveservices.azure.com scope, request a new token "
+            "with the ai.azure.com scope above."
         )
 
     hints.append(
-        "Your identity needs access to the Foundry project and model deployment "
-        "(for example Azure AI User / Cognitive Services User on the account or project)."
+        "Your identity needs Foundry data-plane access on the project and deployment "
+        "(for example the Foundry User role)."
     )
     if provider_id == "microsoft_bing":
         hints.append(
-            "Bing grounding also requires permission to create and delete short-lived agent "
-            "versions in the project, plus access to the configured Bing grounding connection."
+            "Bing grounding also needs Foundry Project Manager (to create/delete the short-lived "
+            "agent used per run) and access to the configured Bing grounding connection."
         )
 
     hints.append("Enable debug mode to inspect the sanitised request and exception details.")

@@ -106,9 +106,10 @@ MICROSOFT_BING_GROUNDING = ModelCatalog(
 
 _AZURE_TOKEN_HELP = (
     "Leave empty to use DefaultAzureCredential on the machine running Streamlit "
-    "(requires `az login` in that same environment). Otherwise paste a fresh token from: "
-    "az account get-access-token --resource https://cognitiveservices.azure.com "
-    "--query accessToken -o tsv"
+    "(requires `az login` in that same environment). Otherwise paste a fresh Foundry token "
+    "from Azure Cloud Shell using: "
+    "az account get-access-token --scope https://ai.azure.com/.default "
+    "--query accessToken -o tsv. Paste only the token string, not the JSON wrapper."
 )
 
 

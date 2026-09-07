@@ -19,6 +19,7 @@ from core.query_discovery import (
     select_useful_chunks,
     validate_public_url,
 )
+from core.query_discovery_config import FETCH_PROFILES, DEFAULT_FETCH_PROFILE
 from core.query_discovery import PageEvidence
 
 
@@ -162,7 +163,7 @@ def test_sensitive_url_query_values_are_redacted():
 
 
 def test_browser_fetch_headers_use_mainstream_user_agent():
-    headers = build_fetch_headers(fetch_profile="browser", accept_language="en-GB")
+    headers = build_fetch_headers(fetch_profile=DEFAULT_FETCH_PROFILE, accept_language="en-GB")
     assert headers["User-Agent"] == BROWSER_USER_AGENT
     assert "Chrome" in headers["User-Agent"]
     assert headers["Accept-Language"].startswith("en-GB")

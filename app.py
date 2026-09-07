@@ -12,7 +12,8 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery import FETCH_PROFILES, QueryDiscoveryResult, discover_queries
+from core.query_discovery_config import FETCH_PROFILES
+from core.query_discovery import QueryDiscoveryResult, discover_queries
 from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
 

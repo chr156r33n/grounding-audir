@@ -294,9 +294,6 @@ def _start_query_discovery(
 
 
 def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) -> None:
-    if not values["query"].strip():
-        st.error("Enter a grounding/search phrase.")
-        return
     if not values["target"].strip() or not normalize_url(values["target"]):
         st.error("Enter a valid target domain, hostname, or HTTP(S) URL.")
         return
@@ -304,9 +301,25 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         st.error("Select at least one provider.")
         return
 
+    query = values["query"].strip()
+    if values["discovery_url"] or values.get("discovery_paste"):
+        discovery = _start_query_discovery(values, configs)
+        if discovery and discovery.candidates and not query:
+            query = discovery.candidates[0].query
+            st.session_state["input_query"] = query
+        if not query:
+            st.error(
+                "Enter a grounding/search phrase, or provide page content that yields "
+                "query suggestions."
+            )
+            return
+    elif not query:
+        st.error("Enter a grounding/search phrase.")
+        return
+
     request = GroundingRequest(
         run_id=str(uuid4()),
-        input_phrase=values["query"].strip(),
+        input_phrase=query,
         targets=[Target(values["target"].strip(), values["match_mode"])],
         market=values["market"],
         language=values["language"],
@@ -318,13 +331,8 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
     jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
     st.session_state["grounding_request"] = request
     st.session_state["grounding_runs"] = []
-    st.session_state["query_discovery"] = None
 
     st.subheader("Running test")
-    if values["discovery_url"] or values.get("discovery_paste"):
-        _start_query_discovery(values, configs)
-        st.session_state["grounding_request"] = request
-        st.session_state["grounding_runs"] = []
 
     statuses = {
         provider_id: st.empty()
@@ -413,6 +421,8 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             f"{source_note} · {evidence.final_url or evidence.requested_url} · "
             f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
         )
+        if evidence.key_terms:
+            st.caption(f"Extracted page terms: {', '.join(evidence.key_terms)}")
     if discovery.candidates:
         st.dataframe(
             [
@@ -457,6 +467,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                     "language": evidence.language,
                     "input_source": evidence.input_source,
                     "fetch_profile": evidence.fetch_profile,
+                    "key_terms": evidence.key_terms,
                     "http_status": evidence.http_status,
                     "content_type": evidence.content_type,
                     "downloaded_bytes": evidence.downloaded_bytes,

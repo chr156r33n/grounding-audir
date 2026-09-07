@@ -13,9 +13,12 @@ from core.query_discovery import (
     build_fetch_headers,
     build_page_evidence_from_content,
     build_query_prompt,
+    build_term_seeded_queries,
     discover_queries,
+    extract_key_terms,
     merge_candidates,
     parse_query_candidates,
+    query_uses_page_terms,
     select_useful_chunks,
     validate_public_url,
 )
@@ -71,11 +74,56 @@ def test_prompt_uses_selected_dom_evidence():
         language=parser.language,
         chunks=select_useful_chunks(parser),
     )
+    evidence.key_terms = extract_key_terms(evidence)
 
     prompt = build_query_prompt(evidence, 6)
     assert "Generate exactly 6 distinct queries" in prompt
     assert "Harbour Hotel in Central Hong Kong" in prompt
+    assert "<KEY_TERMS>" in prompt
+    assert "harbour hotel" in prompt.lower()
+    assert "Every query you return MUST incorporate at least one KEY_TERM" in prompt
     assert "Do not include the URL itself as the query" in prompt
+
+
+def test_extract_key_terms_from_page_evidence():
+    evidence = build_page_evidence_from_content(HTML, source_url="https://example.com/hotel")
+    terms = extract_key_terms(evidence)
+    assert "harbour hotel" in terms
+    assert any("rooftop pool" in term for term in terms)
+    assert "the" not in terms
+
+
+def test_term_seeded_queries_use_page_vocabulary():
+    evidence = build_page_evidence_from_content(HTML, source_url="https://example.com/hotel")
+    evidence.key_terms = extract_key_terms(evidence)
+    seeded = build_term_seeded_queries(evidence, evidence.key_terms, limit=6)
+    assert seeded
+    assert all(query_uses_page_terms(item.query, evidence.key_terms) for item in seeded)
+    assert all("page_terms" in item.generators for item in seeded)
+
+
+def test_merge_candidates_prefers_term_seeded_seed():
+    seed = [
+        QueryCandidate("Harbour hotel Hong Kong", generators=("page_terms",)),
+        QueryCandidate("Family suites Central", generators=("page_terms",)),
+    ]
+    results = [
+        GeneratorResult(
+            "openai",
+            "OpenAI",
+            "gpt-test",
+            "complete",
+            12,
+            queries=[
+                QueryCandidate("Harbour hotel Hong Kong", generators=("openai",)),
+                QueryCandidate("Rooftop pool hotels Hong Kong", generators=("openai",)),
+            ],
+        ),
+    ]
+    merged = merge_candidates(results, 3, seed=seed)
+    assert merged[0].generators == ("page_terms", "openai")
+    assert merged[1].query == "Family suites Central"
+    assert merged[2].query == "Rooftop pool hotels Hong Kong"
 
 
 def test_query_parser_accepts_fenced_json():
@@ -221,4 +269,5 @@ def test_discover_queries_uses_paste_without_fetch(monkeypatch):
     )
     assert result.evidence is not None
     assert result.evidence.input_source == "paste"
+    assert result.evidence.key_terms
     assert result.candidates

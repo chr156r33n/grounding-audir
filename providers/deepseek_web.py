@@ -18,6 +18,7 @@ from core.debug import (
 from .base import GroundingProvider
 from .microsoft_common import parse_responses_result
 from .model_catalog import DEEPSEEK_WEB_SEARCH, model_field
+from .responses_parsing import RESPONSES_INCLUDE_FIELDS
 
 DEEPSEEK_API_BASE_URL = "https://api.deepseek.com"
 
@@ -124,5 +125,5 @@ class DeepSeekWebProvider(GroundingProvider):
         run.metadata["market_applied"] = False
         run.metadata["language_applied"] = False
         run.metadata["sources_requested"] = True
-        run.metadata["include_fields"] = ["web_search_call.action.sources"]
+        run.metadata["include_fields"] = list(RESPONSES_INCLUDE_FIELDS)
         return attach_observation_diagnostics(run)

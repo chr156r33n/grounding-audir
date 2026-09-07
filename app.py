@@ -649,6 +649,14 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
             )
         else:
             st.info("No citation URLs were exposed in this response.")
+        anchor_references = run.metadata.get("anchor_references") or []
+        if anchor_references:
+            st.markdown("#### Anchor references without URLs")
+            st.caption(
+                "Some providers return inline anchor text or titles without exposing the "
+                "underlying citation URL. These cannot be used for target-domain matching."
+            )
+            st.dataframe(anchor_references, hide_index=True, use_container_width=True)
 
         st.markdown("#### Final response")
         st.text(run.response_text or "No final response text was exposed.")
@@ -687,6 +695,8 @@ def _methodology_help() -> None:
     prove YES or NO (for example Gemini citations without a SERP list, or Bing without raw
     grounding output).
   - **N/A** — retrieval is not applicable for that provider type.
+- **Target cited** also requires an exposed **citation URL**. Anchor text or page titles alone
+  are shown separately and do not count as URL citations.
 - Source, retrieval, and citation order must not be treated as conventional organic rank.
 - Provider and model choices can change results, and grounding runs are inherently variable.
 """

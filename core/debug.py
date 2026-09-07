@@ -118,13 +118,14 @@ def exception_debug(exc: Exception) -> dict[str, Any]:
 
 def openai_request_body(model: str, request: GroundingRequest, tool: dict[str, Any]) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
+    from providers.responses_parsing import RESPONSES_INCLUDE_FIELDS
 
     return {
         "model": model,
         "input": CANONICAL_INSTRUCTION.format(query=request.input_phrase),
         "tools": [tool],
         "tool_choice": "required",
-        "include": ["web_search_call.action.sources"],
+        "include": list(RESPONSES_INCLUDE_FIELDS),
     }
 
 
@@ -149,13 +150,14 @@ def foundry_web_search_request_body(
     tool: dict[str, Any],
 ) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
+    from providers.responses_parsing import RESPONSES_INCLUDE_FIELDS
 
     return {
         "model": model,
         "input": CANONICAL_INSTRUCTION.format(query=request.input_phrase),
         "tools": [tool],
         "tool_choice": "required",
-        "include": ["web_search_call.action.sources"],
+        "include": list(RESPONSES_INCLUDE_FIELDS),
     }
 
 

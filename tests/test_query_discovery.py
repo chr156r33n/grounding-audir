@@ -3,12 +3,17 @@ import socket
 import pytest
 
 from core.query_discovery import (
+    BROWSER_USER_AGENT,
     GeneratorResult,
     QueryCandidate,
     QueryDiscoveryError,
+    TRANSPARENT_USER_AGENT,
     _EvidenceParser,
     _redact_url,
+    build_fetch_headers,
+    build_page_evidence_from_content,
     build_query_prompt,
+    discover_queries,
     merge_candidates,
     parse_query_candidates,
     select_useful_chunks,
@@ -154,3 +159,65 @@ def test_sensitive_url_query_values_are_redacted():
     assert "id=42" in redacted
     assert "secret" not in redacted
     assert "signed" not in redacted
+
+
+def test_browser_fetch_headers_use_mainstream_user_agent():
+    headers = build_fetch_headers(fetch_profile="browser", accept_language="en-GB")
+    assert headers["User-Agent"] == BROWSER_USER_AGENT
+    assert "Chrome" in headers["User-Agent"]
+    assert headers["Accept-Language"].startswith("en-GB")
+
+
+def test_transparent_fetch_headers_keep_identifiable_bot():
+    headers = build_fetch_headers(fetch_profile="transparent")
+    assert headers["User-Agent"] == TRANSPARENT_USER_AGENT
+
+
+def test_build_page_evidence_from_pasted_html():
+    evidence = build_page_evidence_from_content(HTML, source_url="https://example.com/hotel")
+    assert evidence.input_source == "paste"
+    assert evidence.title == "Harbour Hotel Hong Kong | Example Hospitality"
+    assert evidence.chunks
+    assert evidence.http_status is None
+
+
+def test_build_page_evidence_from_plain_text():
+    pasted = (
+        "Harbour Hotel in Central Hong Kong\n\n"
+        "Stay beside Victoria Harbour with family suites, a rooftop pool, and restaurants near Central.\n\n"
+        "Guests can reserve Cantonese dining, afternoon tea, and connecting rooms for family holidays."
+    )
+    evidence = build_page_evidence_from_content(pasted, source_url="https://example.com/hotel")
+    assert evidence.input_source == "paste"
+    assert evidence.content_type == "text/plain"
+    assert any("rooftop pool" in chunk.text for chunk in evidence.chunks)
+
+
+def test_discover_queries_uses_paste_without_fetch(monkeypatch):
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("fetch should be skipped when pasted content is supplied")
+
+    monkeypatch.setattr("core.query_discovery.fetch_page_evidence", fail_fetch)
+    monkeypatch.setattr(
+        "core.query_discovery._generate_openai",
+        lambda prompt, config, debug: GeneratorResult(
+            "openai",
+            "OpenAI",
+            "gpt-test",
+            "complete",
+            1,
+            queries=[QueryCandidate("family hotels Central Hong Kong", generators=("openai",))],
+        ),
+    )
+    monkeypatch.setattr("core.query_discovery._generate_gemini", lambda *args, **kwargs: GeneratorResult(
+        "gemini", "Gemini", "gemini-test", "complete", 1, queries=[]
+    ))
+
+    result = discover_queries(
+        "https://example.com/hotel",
+        openai_config={"api_key": "secret", "model": "gpt-5.5"},
+        page_content=HTML,
+    )
+    assert result.evidence is not None
+    assert result.evidence.input_source == "paste"
+    assert result.candidates

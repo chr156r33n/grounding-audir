@@ -13,6 +13,7 @@ from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
 from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
 
 st.set_page_config(page_title="Grounding Source Observatory", page_icon="🔭", layout="wide")
@@ -190,6 +191,7 @@ def _configuration_form():
 
         st.subheader("Provider credentials / configuration")
         st.caption("Secrets remain in this Streamlit process and are never included in exports.")
+        render_credentials_help()
         configs: dict[str, dict[str, str]] = {}
         for provider in PROVIDERS.values():
             with st.expander(provider.name, expanded=False):

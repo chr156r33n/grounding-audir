@@ -14,5 +14,8 @@
     "@cloudflare/workers-types": "latest",
     "typescript": "latest",
     "wrangler": "latest"
+  },
+  "dependencies": {
+    "tldts": "latest"
   }
 }

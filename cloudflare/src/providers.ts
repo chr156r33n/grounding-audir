@@ -6,6 +6,7 @@ import type {
   RunRequest,
   Source,
 } from "./types.ts";
+import { getDomain } from "tldts";
 
 const NAMES: Record<ProviderId, string> = {
   openai_web: "OpenAI Web Search",
@@ -208,6 +209,7 @@ function parseResponses(
   const textParts: string[] = [];
   let searchCalls = 0;
   let sourcesObservable = false;
+  let anchorReferences = 0;
 
   for (const item of output) {
     if (!isRecord(item)) continue;
@@ -243,7 +245,16 @@ function parseResponses(
         for (const annotation of content.annotations) {
           if (!isRecord(annotation)) continue;
           const url = recordUrl(annotation);
-          if (!url) continue;
+          if (!url) {
+            if (
+              typeof annotation.title === "string" ||
+              typeof annotation.name === "string" ||
+              sliceText(text, annotation.start_index, annotation.end_index)
+            ) {
+              anchorReferences += 1;
+            }
+            continue;
+          }
           citations.push({
             url,
             title: stringValue(annotation.title || annotation.name),
@@ -280,7 +291,11 @@ function parseResponses(
         ? "YES"
         : "NO"
       : "UNKNOWN",
-    targetCited: citations.some((citation) => citation.targetMatch) ? "YES" : "NO",
+    targetCited: citations.some((citation) => citation.targetMatch)
+      ? "YES"
+      : anchorReferences
+        ? "UNKNOWN"
+        : "NO",
     generatedQueries,
     sources,
     citations,
@@ -290,6 +305,7 @@ function parseResponses(
       actualModel: payload.model,
       usage: payload.usage,
       sourcesObservable,
+      anchorReferencesWithoutUrl: anchorReferences,
     },
     ...(request.debug ? { rawResponse: raw } : {}),
   };
@@ -450,14 +466,8 @@ function marketLocale(request: RunRequest) {
 }
 
 function rootDomain(hostname: string) {
-  const labels = hostname.toLowerCase().replace(/\.$/, "").split(".");
-  if (labels.length <= 2) return labels.join(".");
-  const twoLevelSuffixes = new Set([
-    "co.uk", "org.uk", "ac.uk", "com.au", "net.au", "org.au", "co.nz",
-    "co.jp", "co.in", "com.br", "com.mx", "com.sg", "com.hk",
-  ]);
-  const suffix = labels.slice(-2).join(".");
-  return labels.slice(twoLevelSuffixes.has(suffix) ? -3 : -2).join(".");
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  return getDomain(normalized, { allowPrivateDomains: true }) || normalized;
 }
 
 function modelFor(id: ProviderId, env: Env) {

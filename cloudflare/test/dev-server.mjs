@@ -16,7 +16,7 @@ const env = {
   DEEPSEEK_MODEL: "deepseek-v4-flash",
   DEEPSEEK_BASE_URL: "https://api.deepseek.com",
   GEMINI_MODEL: "gemini-3.6-flash",
-  GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta/interactions",
+  GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1/interactions",
   FOUNDRY_MODEL: "gpt-5-mini",
   FOUNDRY_SEARCH_CONTEXT_SIZE: "medium",
   WEBIQ_API_URL: "https://api.microsoft.ai/v3/search/web",

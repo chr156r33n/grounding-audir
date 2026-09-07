@@ -104,6 +104,23 @@ MICROSOFT_BING_GROUNDING = ModelCatalog(
 )
 
 
+def deployment_field(catalog: ModelCatalog, *, label: str = "Model deployment") -> "ProviderField":
+    from core.models import ProviderField
+
+    return ProviderField(
+        key="model",
+        label=label,
+        required=True,
+        default=catalog.default,
+        help=(
+            "Enter the exact deployment name from your Foundry project "
+            "(Models + endpoints → Deployments). Documented web-search-capable "
+            f"models checked {catalog.documentation_checked}: "
+            f"{', '.join(catalog.values)}. See {catalog.documentation_url}"
+        ),
+    )
+
+
 def model_field(catalog: ModelCatalog, *, label: str = "Model") -> "ProviderField":
     from core.models import ProviderField
 

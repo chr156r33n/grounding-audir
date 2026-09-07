@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from core.diagnostics import attach_observation_diagnostics
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
 from core.debug import (
@@ -13,10 +14,10 @@ from core.debug import (
     foundry_web_search_request_body,
     record_api_request,
 )
-from core.diagnostics import attach_observation_diagnostics
+from core.provider_errors import validate_foundry_project_endpoint
 from .base import GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
-from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, model_field
+from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, deployment_field
 
 
 class MicrosoftWebProvider(GroundingProvider):
@@ -27,7 +28,7 @@ class MicrosoftWebProvider(GroundingProvider):
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),
-        model_field(MICROSOFT_FOUNDRY_WEB_SEARCH, label="Model deployment"),
+        deployment_field(MICROSOFT_FOUNDRY_WEB_SEARCH),
         ProviderField(
             "search_context_size",
             "Search context size",
@@ -53,6 +54,7 @@ class MicrosoftWebProvider(GroundingProvider):
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         errors = super().validate_config(config)
+        errors.extend(validate_foundry_project_endpoint(str(config.get("project_endpoint", ""))))
         if (config.get("search_context_size") or "medium").lower() not in {
             "low",
             "medium",
@@ -89,17 +91,16 @@ class MicrosoftWebProvider(GroundingProvider):
                     trace.event("http_request_completed")
         except Exception as exc:
             trace.event("http_request_failed")
-            if debug:
-                attach_debug_to_exception(
-                    exc,
-                    {
-                        "context": build_run_debug_context(self.id, request, config),
-                        "trace": trace.events,
-                        "api": "azure.foundry.responses",
-                        "operation": "responses.create",
-                        "request_body": request_body,
-                    },
-                )
+            attach_debug_to_exception(
+                exc,
+                {
+                    "context": build_run_debug_context(self.id, request, config),
+                    "trace": trace.events,
+                    "api": "azure.foundry.responses",
+                    "operation": "responses.create",
+                    "request_body": request_body,
+                },
+            )
             raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)

@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any
 
 from core.diagnostics import attach_observation_diagnostics
+from core.provider_errors import extract_provider_error_details, invalid_config_message
 from providers.base import GroundingProvider
 
 from core.debug import (
@@ -120,7 +121,11 @@ def execute_providers(
                 try:
                     run = future.result()
                 except Exception as exc:  # Defensive: wrapper should normally convert this.
-                    run = _failure_run(provider, request, _classify_exception(exc))
+                    run = _failure_run(
+                        provider,
+                        request,
+                        _classify_exception(exc, provider_id=provider.id),
+                    )
                 if on_progress:
                     on_progress(provider.id, run.status.value)
                 yield run
@@ -199,11 +204,12 @@ def _run_with_retries(
             return run
         except Exception as exc:
             trace.event("provider_run_failed", attempt=retries + 1, error_type=type(exc).__name__)
-            error = _classify_exception(exc)
+            error = _classify_exception(exc, provider_id=provider.id, config=config)
             if not error.retryable or retries >= max_retries:
                 run = _failure_run(provider, request, error)
                 run.metadata["retry_count"] = retries
                 run.metadata["timeout_seconds"] = request_timeout_seconds(config)
+                run.metadata["error_details"] = extract_provider_error_details(exc)
                 run.latency_ms = round((time.monotonic() - started) * 1000)
                 if debug:
                     provider_debug = exception_debug(exc)
@@ -284,7 +290,12 @@ def _timeout_run(
     return attach_observation_diagnostics(run)
 
 
-def _classify_exception(exc: Exception) -> ProviderError:
+def _classify_exception(
+    exc: Exception,
+    *,
+    provider_id: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> ProviderError:
     status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     if not isinstance(status, int):
         response = getattr(exc, "response", None)
@@ -317,7 +328,7 @@ def _classify_exception(exc: Exception) -> ProviderError:
     elif status in {400, 404, 422}:
         error_type, message, retryable = (
             ErrorType.INVALID_CONFIG,
-            "The provider rejected the request configuration or model.",
+            invalid_config_message(exc, provider_id=provider_id, config=config),
             False,
         )
     else:

@@ -533,6 +533,10 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
         st.write(summary)
         if run.error:
             st.error(run.error.safe_message)
+            error_details = run.metadata.get("error_details")
+            if error_details:
+                with st.expander("API error details"):
+                    st.json(error_details)
             if run.status.value == "timed_out":
                 timeout = run.metadata.get("timeout_seconds")
                 retries = run.metadata.get("retry_count")

@@ -128,6 +128,11 @@ def openai_request_body(model: str, request: GroundingRequest, tool: dict[str, A
     }
 
 
+def deepseek_request_body(model: str, request: GroundingRequest, tool: dict[str, Any]) -> dict[str, Any]:
+    body = openai_request_body(model, request, tool)
+    return body
+
+
 def gemini_request_body(model: str, request: GroundingRequest) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
 

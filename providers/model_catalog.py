@@ -42,6 +42,20 @@ OPENAI_WEB_SEARCH = ModelCatalog(
     ),
 )
 
+DEEPSEEK_WEB_SEARCH = ModelCatalog(
+    default="deepseek-v4-flash",
+    documentation_url="https://api-docs.deepseek.com/api/create-response/",
+    documentation_checked="2026-09-07",
+    choices=(
+        ModelChoice(
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+            "Fast default for Responses API web_search",
+        ),
+        ModelChoice("deepseek-v4-pro", "deepseek-v4-pro", "Higher-quality web search"),
+    ),
+)
+
 GEMINI_GOOGLE_SEARCH = ModelCatalog(
     default="gemini-3.6-flash",
     documentation_url="https://ai.google.dev/gemini-api/docs/google-search",

@@ -25,11 +25,15 @@ def test_provider_rejects_undocumented_model():
 
 def test_catalog_defaults_match_provider_defaults():
     from providers.deepseek_web import DeepSeekWebProvider
+    from providers.microsoft_bing import MicrosoftBingProvider
+    from providers.microsoft_web import MicrosoftWebProvider
 
     assert GeminiProvider.default_model == GEMINI_GOOGLE_SEARCH.default
     assert DeepSeekWebProvider.default_model == DEEPSEEK_WEB_SEARCH.default
+    assert MicrosoftWebProvider.default_model == MICROSOFT_FOUNDRY_WEB_SEARCH.default
+    assert MicrosoftBingProvider.default_model == MICROSOFT_BING_GROUNDING.default
     assert OPENAI_WEB_SEARCH.default == "gpt-5.5"
-    assert MICROSOFT_BING_GROUNDING.default == "gpt-4.1-mini"
+    assert MICROSOFT_BING_GROUNDING.default == "gpt-5-mini"
 
 
 def test_deployment_field_is_free_text_with_documented_help():

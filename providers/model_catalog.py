@@ -77,7 +77,7 @@ GEMINI_GOOGLE_SEARCH = ModelCatalog(
 )
 
 MICROSOFT_FOUNDRY_WEB_SEARCH = ModelCatalog(
-    default="gpt-5.5",
+    default="gpt-5-mini",
     documentation_url="https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/web-search",
     documentation_checked="2026-09-06",
     choices=(
@@ -103,7 +103,7 @@ MICROSOFT_FOUNDRY_WEB_SEARCH = ModelCatalog(
 )
 
 MICROSOFT_BING_GROUNDING = ModelCatalog(
-    default="gpt-4.1-mini",
+    default="gpt-5-mini",
     documentation_url="https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/bing-tools",
     documentation_checked="2026-09-06",
     choices=(

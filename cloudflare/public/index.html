@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Compare observable web-grounding evidence across AI providers." />
+    <title>Grounding Observatory — Edge Edition</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <header class="shell masthead">
+      <a class="brand" href="/">
+        <span class="brand-mark">GO</span>
+        <span>Grounding Observatory</span>
+      </a>
+      <div class="edition"><span></span> Edge edition</div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Retrieval evidence, not rank tracking</p>
+          <h1>See what the models<br /><em>actually surface.</em></h1>
+        </div>
+        <p class="intro">
+          Run one search intent across multiple grounding systems. Compare citations,
+          consulted sources, and the gaps each provider leaves behind.
+        </p>
+      </section>
+
+      <section class="workspace">
+        <form id="run-form" class="panel control-panel">
+          <div class="panel-heading">
+            <span class="step">01</span>
+            <div><h2>Define the test</h2><p>All credentials stay in Worker secrets.</p></div>
+          </div>
+          <label>
+            <span>Observatory access key</span>
+            <input id="access-key" type="password" required autocomplete="current-password"
+              placeholder="Configured as a Cloudflare Worker secret" />
+          </label>
+          <label>
+            <span>Grounding / search phrase</span>
+            <textarea id="query" required rows="3" placeholder="best luxury family hotels in Hong Kong"></textarea>
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>Target domain or URL</span>
+              <input id="target" required placeholder="example.com" />
+            </label>
+            <label>
+              <span>Match mode</span>
+              <select id="match-mode">
+                <option value="root_domain">Root domain</option>
+                <option value="exact_hostname">Exact hostname</option>
+                <option value="url_prefix">URL prefix</option>
+              </select>
+            </label>
+            <label>
+              <span>Market</span>
+              <input id="market" value="en-GB" placeholder="en-US" />
+            </label>
+            <label>
+              <span>Language</span>
+              <input id="language" value="en" placeholder="en" />
+            </label>
+          </div>
+
+          <fieldset>
+            <legend>Providers</legend>
+            <div id="providers" class="provider-list"><p class="muted">Loading configuration…</p></div>
+          </fieldset>
+          <label class="toggle">
+            <input id="debug" type="checkbox" />
+            <span class="toggle-ui"></span>
+            Include sanitised raw responses
+          </label>
+          <button id="run-button" class="primary" type="submit">
+            <span>Run observatory</span><span aria-hidden="true">↗</span>
+          </button>
+          <p id="form-error" class="error" role="alert"></p>
+        </form>
+
+        <aside class="panel discovery-panel">
+          <div class="panel-heading">
+            <span class="step">02</span>
+            <div><h2>Discover queries</h2><p>Extract vocabulary from a page first.</p></div>
+          </div>
+          <label>
+            <span>Public page URL <small>optional</small></span>
+            <input id="discovery-url" type="url" placeholder="https://example.com/page" />
+          </label>
+          <div class="divider"><span>or paste page copy</span></div>
+          <label>
+            <span>HTML or visible text</span>
+            <textarea id="discovery-content" rows="8" placeholder="Paste a page title, headings, and body copy…"></textarea>
+          </label>
+          <button id="discover-button" class="secondary" type="button">Extract terms &amp; queries</button>
+          <p id="discovery-error" class="error" role="alert"></p>
+          <div id="discovery-results" hidden>
+            <p class="micro-label">Extracted vocabulary</p>
+            <div id="term-list" class="term-list"></div>
+            <p class="micro-label">Candidate queries</p>
+            <div id="candidate-list" class="candidate-list"></div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="results" class="results" hidden>
+        <div class="results-head">
+          <div><p class="eyebrow">Run results</p><h2>Grounding comparison</h2></div>
+          <button id="download-button" class="text-button" type="button">Download JSON ↓</button>
+        </div>
+        <div id="summary-grid" class="summary-grid"></div>
+        <div id="run-details" class="run-details"></div>
+      </section>
+    </main>
+
+    <footer class="shell">
+      <p>Grounding Observatory <span>·</span> Cloudflare Workers</p>
+      <p>UNKNOWN is not NO. Citations are not conventional search rankings.</p>
+    </footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

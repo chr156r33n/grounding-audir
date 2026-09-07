@@ -16,6 +16,14 @@ _WEB_SEARCH_UNSUPPORTED = re.compile(
     r"web[_ -]?search|tool|unsupported|not supported|invalid tool",
     re.I,
 )
+_CREDENTIAL_UNAVAILABLE = re.compile(
+    r"credential.?unavailable|defaultazurecredential|failed to retrieve|no credential",
+    re.I,
+)
+_AZURE_TOKEN_COMMAND = (
+    "az account get-access-token --resource https://cognitiveservices.azure.com "
+    "--query accessToken -o tsv"
+)
 
 
 def extract_provider_error_details(exc: Exception) -> dict[str, Any]:
@@ -81,6 +89,92 @@ def invalid_config_message(
 
     hint = configuration_hint(provider_id, config, details)
     return f"{base} {hint}".strip()
+
+
+def auth_error_message(
+    exc: Exception,
+    *,
+    provider_id: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> str:
+    details = extract_provider_error_details(exc)
+    api_message = _api_message(details)
+    status = details.get("status_code")
+    exc_name = type(exc).__name__
+    exc_text = str(exc).strip()
+    token_configured = bool(str((config or {}).get("azure_token") or "").strip())
+
+    if provider_id not in _FOUNDRY_PROVIDER_IDS:
+        base = "Authentication failed. Check this provider's credentials and access."
+        if api_message:
+            base = f"{base} Provider message: {api_message}"
+        return base
+
+    if not token_configured and (
+        "CredentialUnavailable" in exc_name
+        or _CREDENTIAL_UNAVAILABLE.search(exc_text)
+        or _CREDENTIAL_UNAVAILABLE.search(api_message or "")
+    ):
+        base = (
+            "No Azure credentials were found on this machine. "
+            "The optional access-token field is empty, so the app tried DefaultAzureCredential "
+            "(for example Azure CLI login) and found nothing usable."
+        )
+    elif status == 403:
+        base = (
+            f"Azure rejected the request with HTTP 403 (forbidden)"
+            + (f": {api_message}" if api_message else ".")
+            + " Your signed-in identity may lack permission on this Foundry project."
+        )
+    elif status == 401:
+        base = (
+            f"Azure rejected the request with HTTP 401 (unauthorized)"
+            + (f": {api_message}" if api_message else ".")
+            + " The access token may be missing, expired, or for the wrong resource."
+        )
+    else:
+        base = "Authentication failed for the configured Azure identity."
+        if api_message:
+            base = f"{base} Provider message: {api_message}"
+        elif exc_text and exc_text != api_message:
+            base = f"{base} {exc_text[:300]}"
+
+    return f"{base} {auth_configuration_hint(provider_id, token_configured=token_configured)}".strip()
+
+
+def auth_configuration_hint(
+    provider_id: str | None,
+    *,
+    token_configured: bool,
+) -> str:
+    if provider_id not in _FOUNDRY_PROVIDER_IDS:
+        return "Enable debug mode for the full sanitised request and response."
+
+    hints: list[str] = []
+    if not token_configured:
+        hints.append(
+            "On the machine running Streamlit, run `az login` and ensure the correct subscription "
+            "is selected, or paste a fresh token into the Azure access token field using: "
+            f"`{_AZURE_TOKEN_COMMAND}`."
+        )
+    else:
+        hints.append(
+            "The pasted Azure access token may be expired. Generate a fresh token with: "
+            f"`{_AZURE_TOKEN_COMMAND}`."
+        )
+
+    hints.append(
+        "Your identity needs access to the Foundry project and model deployment "
+        "(for example Azure AI User / Cognitive Services User on the account or project)."
+    )
+    if provider_id == "microsoft_bing":
+        hints.append(
+            "Bing grounding also requires permission to create and delete short-lived agent "
+            "versions in the project, plus access to the configured Bing grounding connection."
+        )
+
+    hints.append("Enable debug mode to inspect the sanitised request and exception details.")
+    return " ".join(hints)
 
 
 def configuration_hint(

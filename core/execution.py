@@ -7,7 +7,11 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any
 
 from core.diagnostics import attach_observation_diagnostics
-from core.provider_errors import extract_provider_error_details, invalid_config_message
+from core.provider_errors import (
+    auth_error_message,
+    extract_provider_error_details,
+    invalid_config_message,
+)
 from providers.base import GroundingProvider
 
 from core.debug import (
@@ -304,7 +308,7 @@ def _classify_exception(
     if status in {401, 403} or "authentication" in name or "credential" in name:
         error_type, message, retryable = (
             ErrorType.AUTH_ERROR,
-            "Authentication failed. Check this provider's credentials and access.",
+            auth_error_message(exc, provider_id=provider_id, config=config),
             False,
         )
     elif status == 429 or "ratelimit" in name:

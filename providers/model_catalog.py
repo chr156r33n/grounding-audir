@@ -104,6 +104,22 @@ MICROSOFT_BING_GROUNDING = ModelCatalog(
 )
 
 
+_AZURE_TOKEN_HELP = (
+    "Leave empty to use DefaultAzureCredential on the machine running Streamlit "
+    "(requires `az login` in that same environment). Otherwise paste a fresh token from: "
+    "az account get-access-token --resource https://cognitiveservices.azure.com "
+    "--query accessToken -o tsv"
+)
+
+
+@dataclass(frozen=True)
+class AzureTokenField:
+    help: str = _AZURE_TOKEN_HELP
+
+
+azure_token_field = AzureTokenField()
+
+
 def deployment_field(catalog: ModelCatalog, *, label: str = "Model deployment") -> "ProviderField":
     from core.models import ProviderField
 

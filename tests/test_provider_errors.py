@@ -1,4 +1,6 @@
 from core.provider_errors import (
+    auth_error_message,
+    auth_configuration_hint,
     configuration_hint,
     extract_provider_error_details,
     invalid_config_message,
@@ -49,3 +51,22 @@ def test_configuration_hint_flags_web_search_unsupported():
         {"response_body": {"error": {"message": "web_search tool is not supported"}}},
     )
     assert "web_search" in hint.lower() or "bing grounding" in hint.lower()
+
+
+def test_auth_error_message_explains_missing_default_credentials():
+    class CredentialUnavailableError(Exception):
+        pass
+
+    message = auth_error_message(
+        CredentialUnavailableError("DefaultAzureCredential failed to retrieve a token"),
+        provider_id="microsoft_bing",
+        config={"azure_token": ""},
+    )
+    assert "No Azure credentials were found" in message
+    assert "az login" in message
+
+
+def test_auth_configuration_hint_mentions_bing_agent_permissions():
+    hint = auth_configuration_hint("microsoft_bing", token_configured=False)
+    assert "agent" in hint.lower()
+    assert "az login" in hint

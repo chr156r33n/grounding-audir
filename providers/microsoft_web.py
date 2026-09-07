@@ -17,7 +17,7 @@ from core.debug import (
 from core.provider_errors import validate_foundry_project_endpoint
 from .base import GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
-from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, deployment_field
+from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, azure_token_field, deployment_field
 
 
 class MicrosoftWebProvider(GroundingProvider):
@@ -42,6 +42,7 @@ class MicrosoftWebProvider(GroundingProvider):
             "Azure access token (optional when DefaultAzureCredential is configured)",
             secret=True,
             required=False,
+            help=azure_token_field.help,
         ),
     )
     capabilities = ProviderCapabilities(

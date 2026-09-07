@@ -14,7 +14,7 @@ from core.debug import (
 )
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
-from .model_catalog import MICROSOFT_BING_GROUNDING, deployment_field
+from .model_catalog import MICROSOFT_BING_GROUNDING, azure_token_field, deployment_field
 
 
 class MicrosoftBingProvider(GroundingProvider):
@@ -41,6 +41,7 @@ class MicrosoftBingProvider(GroundingProvider):
             "Azure access token (optional when DefaultAzureCredential is configured)",
             secret=True,
             required=False,
+            help=azure_token_field.help,
         ),
         ProviderField("result_count", "Result count", required=False, default="7"),
         ProviderField("freshness", "Freshness (optional)", required=False),

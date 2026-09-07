@@ -12,7 +12,7 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery import QueryDiscoveryResult, discover_queries, page_key_terms
 from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
@@ -412,6 +412,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
         st.warning(discovery.error)
     if discovery.evidence:
         evidence = discovery.evidence
+        key_terms = page_key_terms(evidence)
         source_note = (
             "Pasted page copy"
             if evidence.input_source == "paste"
@@ -421,8 +422,8 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             f"{source_note} · {evidence.final_url or evidence.requested_url} · "
             f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
         )
-        if evidence.key_terms:
-            st.caption(f"Extracted page terms: {', '.join(evidence.key_terms)}")
+        if key_terms:
+            st.caption(f"Extracted page terms: {', '.join(key_terms)}")
     if discovery.candidates:
         st.dataframe(
             [
@@ -457,6 +458,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             st.info("No page evidence was extracted.")
         else:
             evidence = discovery.evidence
+            key_terms = page_key_terms(evidence)
             st.write(
                 {
                     "requested_url": evidence.requested_url,
@@ -467,7 +469,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                     "language": evidence.language,
                     "input_source": evidence.input_source,
                     "fetch_profile": evidence.fetch_profile,
-                    "key_terms": evidence.key_terms,
+                    "key_terms": key_terms,
                     "http_status": evidence.http_status,
                     "content_type": evidence.content_type,
                     "downloaded_bytes": evidence.downloaded_bytes,

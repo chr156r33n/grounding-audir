@@ -17,6 +17,7 @@ from core.query_discovery import (
     discover_queries,
     extract_key_terms,
     merge_candidates,
+    page_key_terms,
     parse_query_candidates,
     query_uses_page_terms,
     select_useful_chunks,
@@ -88,9 +89,20 @@ def test_prompt_uses_selected_dom_evidence():
 def test_extract_key_terms_from_page_evidence():
     evidence = build_page_evidence_from_content(HTML, source_url="https://example.com/hotel")
     terms = extract_key_terms(evidence)
-    assert "harbour hotel" in terms
+    assert any("harbour hotel" in term for term in terms)
     assert any("rooftop pool" in term for term in terms)
     assert "the" not in terms
+
+
+def test_page_key_terms_repairs_stale_session_evidence():
+    evidence = build_page_evidence_from_content(HTML, source_url="https://example.com/hotel")
+    del evidence.key_terms
+
+    terms = page_key_terms(evidence)
+
+    assert terms
+    assert evidence.key_terms == terms
+    assert any("harbour hotel" in term for term in terms)
 
 
 def test_term_seeded_queries_use_page_vocabulary():

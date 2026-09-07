@@ -15,22 +15,18 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .export import redact_secrets
 from .models import utc_now
+from .query_discovery_config import (
+    BROWSER_USER_AGENT,
+    DEFAULT_FETCH_PROFILE,
+    FETCH_PROFILES,
+    TRANSPARENT_USER_AGENT,
+)
 
 MAX_HTML_BYTES = 1_500_000
 MAX_REDIRECTS = 5
 MAX_PROMPT_CHARS = 8_000
 FETCH_TIMEOUT_SECONDS = 15.0
 GENERATOR_TIMEOUT_SECONDS = 60.0
-TRANSPARENT_USER_AGENT = "GroundingSourceObservatory/1.0 (+research query discovery)"
-BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
-FETCH_PROFILES = {
-    "browser": "Browser-like request (recommended for WAF-protected sites)",
-    "transparent": "Transparent observatory bot User-Agent",
-}
-DEFAULT_FETCH_PROFILE = "browser"
 
 
 @dataclass(frozen=True)

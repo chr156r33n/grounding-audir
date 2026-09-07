@@ -20,6 +20,28 @@ select **Run test**. API calls are concurrent. The default per-provider timeout 
 90 seconds (configurable in the form; OpenAI and other web-search providers use
 at least 120 seconds when needed). Provider API costs may apply.
 
+## URL query discovery
+
+Optionally paste a public page URL in **Source URL for query discovery**, then
+select **Discover queries from URL** to run discovery without starting the
+grounding providers. Alternatively, **Run test** performs discovery and the
+configured grounding run together. The app:
+
+1. downloads the page's static HTML once (no browser or JavaScript execution);
+2. extracts the title, description, canonical URL, headings, and high-signal
+   body chunks;
+3. asks each configured OpenAI and Gemini API for realistic queries where that
+   page would be highly relevant if it is indexed and available to the
+   retrieval pipeline; and
+4. merges and displays the candidates with rationale and supporting DOM
+   evidence.
+
+Use a suggestion to populate the main query field, then explicitly run the test
+again. Suggestions are retrieval hypotheses, not rank or inclusion guarantees.
+Query discovery only fetches public HTTP(S) addresses: private, loopback, and
+link-local targets are rejected, redirects are revalidated, downloads are
+size-limited, and only HTML content is accepted.
+
 ## Provider configuration
 
 | Provider | Configuration | Retrieval observability | Citation observability |
@@ -70,8 +92,9 @@ states?** — each YES/NO/UNKNOWN/N/A value includes a plain-language reason
 Credentials are password-masked and remain in Streamlit session/process
 memory. They are not written to disk, logged, or included in exports. Raw
 responses are optional in JSON exports and recursively redact secret-bearing
-fields. Retrieved content is rendered as text and the app does not crawl cited
-URLs. Google Search Suggestions are the sole provider markup rendered, using
+fields. Retrieved content is rendered as text. The optional query-discovery
+fetch downloads only the user-supplied public page; provider citations are not
+crawled. Google Search Suggestions are the sole provider markup rendered, using
 isolated Streamlit iframes as required by Google; other provider HTML is not
 rendered.
 

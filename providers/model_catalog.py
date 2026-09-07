@@ -39,11 +39,6 @@ OPENAI_WEB_SEARCH = ModelCatalog(
         ModelChoice("gpt-5.4-nano", "gpt-5.4-nano"),
         ModelChoice("gpt-4.1", "gpt-4.1"),
         ModelChoice("gpt-4.1-mini", "gpt-4.1-mini"),
-        ModelChoice(
-            "gpt-5-search-api",
-            "gpt-5-search-api",
-            "Chat Completions search path; legacy integration only",
-        ),
     ),
 )
 

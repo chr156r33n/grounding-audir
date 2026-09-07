@@ -44,7 +44,7 @@ def test_openai_distinguishes_sources_and_citations(request):
     assert run.target_cited is ObservationState.YES
     assert len(run.sources) == 2
     assert run.sources[0].cited is ObservationState.YES
-    assert run.citations[0].cited_text is None
+    assert run.citations[0].cited_text == "Four Seasons"
 
 
 def test_deepseek_parses_like_responses_web_search(request):

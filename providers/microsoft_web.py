@@ -18,6 +18,7 @@ from core.provider_errors import validate_foundry_project_endpoint
 from .base import GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
 from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, azure_token_field, deployment_field
+from .responses_parsing import RESPONSES_INCLUDE_FIELDS
 
 
 class MicrosoftWebProvider(GroundingProvider):
@@ -132,7 +133,7 @@ class MicrosoftWebProvider(GroundingProvider):
         run.metadata["market_applied"] = bool(_market_country(request.market))
         run.metadata["language_applied"] = False
         run.metadata["sources_requested"] = True
-        run.metadata["include_fields"] = ["web_search_call.action.sources"]
+        run.metadata["include_fields"] = list(RESPONSES_INCLUDE_FIELDS)
         return attach_observation_diagnostics(run)
 
 

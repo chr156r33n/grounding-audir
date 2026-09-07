@@ -18,6 +18,7 @@ from core.timeouts import request_timeout_seconds
 from .base import GroundingProvider
 from .microsoft_common import parse_responses_result
 from .model_catalog import OPENAI_WEB_SEARCH, model_field
+from .responses_parsing import RESPONSES_INCLUDE_FIELDS
 
 
 class OpenAIWebProvider(GroundingProvider):
@@ -104,7 +105,7 @@ class OpenAIWebProvider(GroundingProvider):
         run.metadata["market_applied"] = bool(_market_country(request.market))
         run.metadata["language_applied"] = False
         run.metadata["sources_requested"] = True
-        run.metadata["include_fields"] = ["web_search_call.action.sources"]
+        run.metadata["include_fields"] = list(RESPONSES_INCLUDE_FIELDS)
         return attach_observation_diagnostics(run)
 
 

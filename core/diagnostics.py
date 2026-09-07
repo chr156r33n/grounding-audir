@@ -142,10 +142,23 @@ def _citation_note(run: GroundingRun) -> str:
                 f"The provider returned {citation_count} citation URL(s), and none matched "
                 "the configured target."
             )
+        anchor_count = len(run.metadata.get("anchor_references") or [])
+        if anchor_count:
+            return (
+                f"The provider returned {anchor_count} anchor reference(s) without URLs. "
+                "Without citation URLs, target cited is NO — not because the target was "
+                "absent, but because URL attribution was not exposed."
+            )
         return "No URL citations were exposed in the provider response."
     if citation_count:
         return (
             f"{citation_count} citation URL(s) were parsed, but citation completeness is "
             "unknown for this provider response."
+        )
+    anchor_count = len(run.metadata.get("anchor_references") or [])
+    if anchor_count:
+        return (
+            f"The provider returned {anchor_count} anchor reference(s) (title/text spans) "
+            "without URLs. The app cannot match a target domain without citation URLs."
         )
     return "Citation attribution could not be determined from the provider response."

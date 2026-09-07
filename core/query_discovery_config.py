@@ -1,5 +1,7 @@
 """Lightweight query-discovery constants for UI and fetch logic."""
 
+QUERY_DISCOVERY_API_VERSION = 2
+
 FETCH_PROFILES = {
     "browser": "Browser-like request (recommended for WAF-protected sites)",
     "transparent": "Transparent observatory bot User-Agent",

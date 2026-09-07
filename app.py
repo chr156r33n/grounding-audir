@@ -12,8 +12,9 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery_config import FETCH_PROFILES
 from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
+from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
 
@@ -264,16 +265,20 @@ def _start_query_discovery(
     else:
         status.info("⟳ Query discovery — fetching and analysing page")
     accept_language = values.get("market") or values.get("language") or "en-GB"
-    discovery = discover_queries(
-        values["discovery_url"],
-        openai_config=configs.get("openai_web"),
-        gemini_config=configs.get("gemini"),
-        count=values["discovery_count"],
-        debug=values["debug_mode"],
-        page_content=values.get("discovery_paste") or None,
-        fetch_profile=values.get("discovery_fetch_profile") or "browser",
-        accept_language=accept_language,
-    )
+    try:
+        discovery = call_discover_queries(
+            values["discovery_url"],
+            openai_config=configs.get("openai_web"),
+            gemini_config=configs.get("gemini"),
+            count=values["discovery_count"],
+            debug=values["debug_mode"],
+            page_content=values.get("discovery_paste") or None,
+            fetch_profile=values.get("discovery_fetch_profile") or DEFAULT_FETCH_PROFILE,
+            accept_language=accept_language,
+        )
+    except QueryDiscoveryCompatibilityError as exc:
+        st.error(str(exc))
+        return None
     st.session_state["query_discovery"] = discovery
     st.session_state["grounding_runs"] = []
     st.session_state.pop("grounding_request", None)

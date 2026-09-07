@@ -104,6 +104,40 @@ MICROSOFT_BING_GROUNDING = ModelCatalog(
 )
 
 
+_AZURE_TOKEN_HELP = (
+    "Leave empty to use DefaultAzureCredential on the machine running Streamlit "
+    "(requires `az login` in that same environment). Otherwise paste a fresh Foundry token "
+    "from Azure Cloud Shell using: "
+    "az account get-access-token --scope https://ai.azure.com/.default "
+    "--query accessToken -o tsv. Paste only the token string, not the JSON wrapper."
+)
+
+
+@dataclass(frozen=True)
+class AzureTokenField:
+    help: str = _AZURE_TOKEN_HELP
+
+
+azure_token_field = AzureTokenField()
+
+
+def deployment_field(catalog: ModelCatalog, *, label: str = "Model deployment") -> "ProviderField":
+    from core.models import ProviderField
+
+    return ProviderField(
+        key="model",
+        label=label,
+        required=True,
+        default=catalog.default,
+        help=(
+            "Enter the exact deployment name from your Foundry project "
+            "(Models + endpoints → Deployments). Documented web-search-capable "
+            f"models checked {catalog.documentation_checked}: "
+            f"{', '.join(catalog.values)}. See {catalog.documentation_url}"
+        ),
+    )
+
+
 def model_field(catalog: ModelCatalog, *, label: str = "Model") -> "ProviderField":
     from core.models import ProviderField
 

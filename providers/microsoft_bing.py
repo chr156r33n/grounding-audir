@@ -4,6 +4,7 @@ from time import perf_counter
 from typing import Any
 
 from core.models import GroundingRequest, ProviderCapabilities, ProviderField, utc_now
+from core.provider_errors import validate_foundry_project_endpoint
 
 from core.debug import (
     DebugTrace,
@@ -13,7 +14,7 @@ from core.debug import (
 )
 from .base import CANONICAL_INSTRUCTION, GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
-from .model_catalog import MICROSOFT_BING_GROUNDING, model_field
+from .model_catalog import MICROSOFT_BING_GROUNDING, azure_token_field, deployment_field
 
 
 class MicrosoftBingProvider(GroundingProvider):
@@ -24,7 +25,7 @@ class MicrosoftBingProvider(GroundingProvider):
     api_version = "v1"
     fields = (
         ProviderField("project_endpoint", "Foundry project endpoint"),
-        model_field(MICROSOFT_BING_GROUNDING, label="Model deployment"),
+        deployment_field(MICROSOFT_BING_GROUNDING, label="Model deployment"),
         ProviderField(
             "connection_name",
             "Bing grounding project connection name",
@@ -40,6 +41,7 @@ class MicrosoftBingProvider(GroundingProvider):
             "Azure access token (optional when DefaultAzureCredential is configured)",
             secret=True,
             required=False,
+            help=azure_token_field.help,
         ),
         ProviderField("result_count", "Result count", required=False, default="7"),
         ProviderField("freshness", "Freshness (optional)", required=False),
@@ -56,6 +58,7 @@ class MicrosoftBingProvider(GroundingProvider):
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         errors = super().validate_config(config)
+        errors.extend(validate_foundry_project_endpoint(str(config.get("project_endpoint", ""))))
         if not config.get("connection_name") and not config.get("connection_id"):
             errors.append("A Bing grounding project connection name or resource ID is required.")
         try:
@@ -168,20 +171,19 @@ class MicrosoftBingProvider(GroundingProvider):
                         )
         except Exception as exc:
             trace.event("provider_request_failed", error_type=type(exc).__name__)
-            if debug:
-                attach_debug_to_exception(
-                    exc,
-                    {
-                        "context": build_run_debug_context(self.id, request, config),
-                        "trace": trace.events,
-                        "api": "azure.foundry.agents+responses",
-                        "operation": "create_version / responses.create / delete_version",
-                        "requests": [
-                            {"operation": "agents.create_version", "body": agent_request},
-                            {"operation": "responses.create", "body": response_request},
-                        ],
-                    },
-                )
+            attach_debug_to_exception(
+                exc,
+                {
+                    "context": build_run_debug_context(self.id, request, config),
+                    "trace": trace.events if debug else [],
+                    "api": "azure.foundry.agents+responses",
+                    "operation": "create_version / responses.create / delete_version",
+                    "requests": [
+                        {"operation": "agents.create_version", "body": agent_request},
+                        {"operation": "responses.create", "body": response_request},
+                    ],
+                },
+            )
             raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)

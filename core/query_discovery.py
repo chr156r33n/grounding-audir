@@ -21,7 +21,16 @@ MAX_REDIRECTS = 5
 MAX_PROMPT_CHARS = 8_000
 FETCH_TIMEOUT_SECONDS = 15.0
 GENERATOR_TIMEOUT_SECONDS = 60.0
-USER_AGENT = "GroundingSourceObservatory/1.0 (+single-page query discovery)"
+TRANSPARENT_USER_AGENT = "GroundingSourceObservatory/1.0 (+research query discovery)"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+FETCH_PROFILES = {
+    "browser": "Browser-like request (recommended for WAF-protected sites)",
+    "transparent": "Transparent observatory bot User-Agent",
+}
+DEFAULT_FETCH_PROFILE = "browser"
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,8 @@ class PageEvidence:
     resolved_addresses: dict[str, list[str]] = field(default_factory=dict)
     request_headers: dict[str, str] = field(default_factory=dict)
     response_headers: dict[str, str] = field(default_factory=dict)
+    input_source: str = "fetch"
+    fetch_profile: str | None = None
     chunks: list[PageChunk] = field(default_factory=list)
 
 
@@ -103,19 +114,38 @@ def discover_queries(
     gemini_config: dict[str, Any] | None = None,
     count: int = 6,
     debug: bool = False,
+    page_content: str | None = None,
+    fetch_profile: str = DEFAULT_FETCH_PROFILE,
+    accept_language: str | None = None,
 ) -> QueryDiscoveryResult:
     try:
         requested_count = max(3, min(int(count), 10))
     except (TypeError, ValueError):
         requested_count = 6
     result = QueryDiscoveryResult(
-        source_url=_redact_url(source_url.strip()),
+        source_url=_redact_url(source_url.strip()) if source_url.strip() else "",
         requested_count=requested_count,
         debug_mode=debug,
     )
+    pasted = str(page_content or "").strip()
     try:
-        evidence = fetch_page_evidence(result.source_url)
+        if pasted:
+            evidence = build_page_evidence_from_content(
+                pasted,
+                source_url=source_url.strip(),
+            )
+        elif source_url.strip():
+            evidence = fetch_page_evidence(
+                source_url,
+                fetch_profile=fetch_profile,
+                accept_language=accept_language,
+            )
+        else:
+            raise QueryDiscoveryError(
+                "Enter a source URL to fetch, or paste page HTML/text to skip the download."
+            )
         result.evidence = evidence
+        result.source_url = evidence.final_url or evidence.requested_url
     except QueryDiscoveryError as exc:
         result.error = str(exc)
         if debug:
@@ -209,16 +239,109 @@ def discover_queries(
     return result
 
 
-def fetch_page_evidence(url: str) -> PageEvidence:
+def build_fetch_headers(
+    *,
+    fetch_profile: str = DEFAULT_FETCH_PROFILE,
+    accept_language: str | None = None,
+) -> dict[str, str]:
+    profile = fetch_profile if fetch_profile in FETCH_PROFILES else DEFAULT_FETCH_PROFILE
+    user_agent = BROWSER_USER_AGENT if profile == "browser" else TRANSPARENT_USER_AGENT
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": accept_language or "en-GB,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+    if profile == "browser":
+        headers.update(
+            {
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            }
+        )
+    return headers
+
+
+def build_page_evidence_from_content(content: str, *, source_url: str = "") -> PageEvidence:
+    normalized_url = ""
+    if source_url.strip():
+        normalized_url = _normalize_public_url(source_url.strip())
+    requested_url = _redact_url(normalized_url) if normalized_url else "pasted-content"
+    final_url = requested_url
+
+    if _looks_like_html(content):
+        parser = _EvidenceParser()
+        try:
+            parser.feed(content)
+            parser.close()
+        except Exception as exc:
+            raise QueryDiscoveryError("The pasted HTML could not be parsed.") from exc
+        chunks = select_useful_chunks(parser)
+        if not chunks:
+            raise QueryDiscoveryError(
+                "The pasted HTML did not yield useful title, headings, description, or body text."
+            )
+        return PageEvidence(
+            requested_url=requested_url,
+            final_url=final_url,
+            title=parser.title,
+            description=parser.description,
+            canonical_url=_redact_url(urljoin(normalized_url, parser.canonical_url))
+            if normalized_url and parser.canonical_url
+            else None,
+            language=parser.language,
+            http_status=None,
+            content_type="text/html",
+            downloaded_bytes=len(content.encode("utf-8")),
+            request_headers={"input_source": "paste"},
+            response_headers={},
+            input_source="paste",
+            fetch_profile=None,
+            chunks=chunks,
+        )
+
+    chunks = _chunks_from_plain_text(content)
+    if not chunks:
+        raise QueryDiscoveryError(
+            "The pasted text was too short to extract useful evidence. Paste HTML or "
+            "several paragraphs of page copy."
+        )
+    title = chunks[0].text[:120] if chunks[0].kind == "title" else None
+    return PageEvidence(
+        requested_url=requested_url,
+        final_url=final_url,
+        title=title,
+        description=chunks[0].text[:240] if chunks else None,
+        http_status=None,
+        content_type="text/plain",
+        downloaded_bytes=len(content.encode("utf-8")),
+        request_headers={"input_source": "paste"},
+        response_headers={},
+        input_source="paste",
+        fetch_profile=None,
+        chunks=chunks,
+    )
+
+
+def fetch_page_evidence(
+    url: str,
+    *,
+    fetch_profile: str = DEFAULT_FETCH_PROFILE,
+    accept_language: str | None = None,
+) -> PageEvidence:
     current_url = _normalize_public_url(url)
     requested_url = _redact_url(current_url)
     redirects: list[str] = []
     resolved_addresses: dict[str, list[str]] = {}
     opener = build_opener(_NoRedirect())
-    request_headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml;q=0.9",
-    }
+    request_headers = build_fetch_headers(
+        fetch_profile=fetch_profile,
+        accept_language=accept_language,
+    )
 
     for _ in range(MAX_REDIRECTS + 1):
         resolved_addresses[_redact_url(current_url)] = validate_public_url(current_url)
@@ -244,7 +367,8 @@ def fetch_page_evidence(url: str) -> PageEvidence:
                 redirects.append(_redact_url(current_url))
                 continue
             raise QueryDiscoveryError(
-                f"The page returned HTTP {exc.code}; its DOM could not be retrieved."
+                f"The page returned HTTP {exc.code}; its DOM could not be retrieved. "
+                "If a WAF blocked the request, paste the page HTML or visible copy instead."
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise QueryDiscoveryError(
@@ -317,6 +441,8 @@ def fetch_page_evidence(url: str) -> PageEvidence:
             resolved_addresses=resolved_addresses,
             request_headers=request_headers,
             response_headers=response_headers,
+            input_source="fetch",
+            fetch_profile=fetch_profile if fetch_profile in FETCH_PROFILES else DEFAULT_FETCH_PROFILE,
             chunks=chunks,
         )
 
@@ -746,6 +872,33 @@ def _redact_url(value: str) -> str:
 
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _looks_like_html(content: str) -> bool:
+    sample = content.lstrip()[:500].lower()
+    return sample.startswith("<!doctype") or sample.startswith("<html") or "<body" in sample or (
+        sample.startswith("<") and ">" in sample[:120]
+    )
+
+
+def _chunks_from_plain_text(content: str) -> list[PageChunk]:
+    paragraphs: list[str] = []
+    for block in re.split(r"\n\s*\n", content):
+        text = _clean_text(block)
+        if len(text) >= 40:
+            paragraphs.append(text)
+        elif len(text) >= 12 and not paragraphs:
+            paragraphs.append(text)
+    if not paragraphs:
+        text = _clean_text(content)
+        if len(text) >= 40:
+            paragraphs = [text]
+    chunks: list[PageChunk] = []
+    for index, text in enumerate(paragraphs[:10]):
+        kind = "title" if index == 0 and len(text) <= 120 else "p"
+        score = 100 if kind == "title" else 50
+        chunks.append(PageChunk(kind, text[:900], score))
+    return chunks
 
 
 def _optional_text(value: Any) -> str | None:

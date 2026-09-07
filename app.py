@@ -12,7 +12,7 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery import FETCH_PROFILES, QueryDiscoveryResult, discover_queries
 from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
 
@@ -141,9 +141,30 @@ def _configuration_form():
             "Optional source URL for query discovery",
             placeholder="https://example.com/page-to-test",
             help=(
-                "On Run test, fetch this public HTML page once, extract high-signal DOM "
-                "chunks, and ask the configured OpenAI and Gemini models for likely "
-                "grounding queries. This does not automatically run those suggestions."
+                "Used as page context for query generation. When pasted copy is provided below, "
+                "the URL is optional but still helps anchor suggestions to the right page."
+            ),
+        )
+        discovery_paste = st.text_area(
+            "Or paste page HTML / visible copy (skips fetch)",
+            placeholder=(
+                "Paste saved HTML or the visible page text here when the live fetch is blocked "
+                "by a WAF, login wall, or JavaScript rendering."
+            ),
+            height=160,
+            help=(
+                "If this field is filled, the app will not download the URL. Paste either raw "
+                "HTML (best) or several paragraphs of visible page copy."
+            ),
+        )
+        discovery_fetch_profile = st.selectbox(
+            "URL fetch profile",
+            options=list(FETCH_PROFILES.keys()),
+            format_func=lambda key: FETCH_PROFILES[key],
+            index=0,
+            help=(
+                "Browser-like requests use a mainstream User-Agent and typical document headers. "
+                "Use transparent only if you prefer an identifiable bot string."
             ),
         )
         discovery_count = st.slider(
@@ -221,6 +242,8 @@ def _configuration_form():
         "timeout_seconds": timeout_seconds,
         "debug_mode": debug_mode,
         "discovery_url": discovery_url.strip(),
+        "discovery_paste": discovery_paste.strip(),
+        "discovery_fetch_profile": discovery_fetch_profile,
         "discovery_count": discovery_count,
     }
     action = "discover" if discover_submitted else "run" if run_submitted else None
@@ -231,17 +254,24 @@ def _start_query_discovery(
     values,
     configs: dict[str, dict[str, str]],
 ) -> QueryDiscoveryResult | None:
-    if not values["discovery_url"]:
-        st.error("Enter a public source URL to discover queries.")
+    if not values["discovery_url"] and not values.get("discovery_paste"):
+        st.error("Enter a source URL to fetch, or paste page HTML/text below.")
         return None
     status = st.empty()
-    status.info("⟳ Query discovery — fetching and analysing page")
+    if values.get("discovery_paste"):
+        status.info("⟳ Query discovery — analysing pasted page copy")
+    else:
+        status.info("⟳ Query discovery — fetching and analysing page")
+    accept_language = values.get("market") or values.get("language") or "en-GB"
     discovery = discover_queries(
         values["discovery_url"],
         openai_config=configs.get("openai_web"),
         gemini_config=configs.get("gemini"),
         count=values["discovery_count"],
         debug=values["debug_mode"],
+        page_content=values.get("discovery_paste") or None,
+        fetch_profile=values.get("discovery_fetch_profile") or "browser",
+        accept_language=accept_language,
     )
     st.session_state["query_discovery"] = discovery
     st.session_state["grounding_runs"] = []
@@ -285,7 +315,7 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
     st.session_state["query_discovery"] = None
 
     st.subheader("Running test")
-    if values["discovery_url"]:
+    if values["discovery_url"] or values.get("discovery_paste"):
         _start_query_discovery(values, configs)
         st.session_state["grounding_request"] = request
         st.session_state["grounding_runs"] = []
@@ -368,9 +398,14 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
         st.warning(discovery.error)
     if discovery.evidence:
         evidence = discovery.evidence
+        source_note = (
+            "Pasted page copy"
+            if evidence.input_source == "paste"
+            else f"Fetched ({evidence.fetch_profile or 'browser'} profile)"
+        )
         st.caption(
-            f"Fetched {evidence.final_url} · {evidence.downloaded_bytes:,} bytes · "
-            f"{len(evidence.chunks)} DOM chunks selected"
+            f"{source_note} · {evidence.final_url or evidence.requested_url} · "
+            f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
         )
     if discovery.candidates:
         st.dataframe(
@@ -414,6 +449,8 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                     "title": evidence.title,
                     "description": evidence.description,
                     "language": evidence.language,
+                    "input_source": evidence.input_source,
+                    "fetch_profile": evidence.fetch_profile,
                     "http_status": evidence.http_status,
                     "content_type": evidence.content_type,
                     "downloaded_bytes": evidence.downloaded_bytes,

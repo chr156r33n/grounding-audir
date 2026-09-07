@@ -8,11 +8,11 @@ from core.models import GeneratedQuery, GroundingRequest, ProviderCapabilities, 
 
 from core.debug import (
     DebugTrace,
+    attach_debug_to_exception,
     build_run_debug_context,
     debug_mode_enabled,
     gemini_request_body,
     record_api_request,
-    record_exception_debug,
 )
 from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 from .model_catalog import GEMINI_GOOGLE_SEARCH, model_field
@@ -57,12 +57,17 @@ class GeminiProvider(GroundingProvider):
             trace.event("http_request_completed")
         except Exception as exc:
             trace.event("http_request_failed")
-            run = self.new_run(request, model)
-            run.metadata["debug"] = {
-                "context": build_run_debug_context(self.id, request, config),
-                "trace": trace.events,
-            }
-            record_exception_debug(run, exc)
+            if debug:
+                attach_debug_to_exception(
+                    exc,
+                    {
+                        "context": build_run_debug_context(self.id, request, config),
+                        "trace": trace.events,
+                        "api": "google.genai.interactions",
+                        "operation": "interactions.create",
+                        "request_body": request_body,
+                    },
+                )
             raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)

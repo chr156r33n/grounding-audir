@@ -7,15 +7,15 @@ from core.models import GroundingRequest, ProviderCapabilities, ProviderField, u
 
 from core.debug import (
     DebugTrace,
+    attach_debug_to_exception,
     build_run_debug_context,
     debug_mode_enabled,
     openai_request_body,
     record_api_request,
-    record_exception_debug,
 )
 from core.diagnostics import attach_observation_diagnostics
 from core.timeouts import request_timeout_seconds
-from .base import CANONICAL_INSTRUCTION, GroundingProvider
+from .base import GroundingProvider
 from .microsoft_common import parse_responses_result
 from .model_catalog import OPENAI_WEB_SEARCH, model_field
 
@@ -59,12 +59,17 @@ class OpenAIWebProvider(GroundingProvider):
             trace.event("http_request_completed")
         except Exception as exc:
             trace.event("http_request_failed")
-            run = self.new_run(request, model)
-            run.metadata["debug"] = {
-                "context": build_run_debug_context(self.id, request, config),
-                "trace": trace.events,
-            }
-            record_exception_debug(run, exc)
+            if debug:
+                attach_debug_to_exception(
+                    exc,
+                    {
+                        "context": build_run_debug_context(self.id, request, config),
+                        "trace": trace.events,
+                        "api": "openai.responses",
+                        "operation": "responses.create",
+                        "request_body": request_body,
+                    },
+                )
             raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)

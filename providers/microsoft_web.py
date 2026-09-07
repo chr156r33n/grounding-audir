@@ -7,15 +7,14 @@ from core.models import GroundingRequest, ProviderCapabilities, ProviderField, u
 
 from core.debug import (
     DebugTrace,
+    attach_debug_to_exception,
     build_run_debug_context,
     debug_mode_enabled,
     foundry_web_search_request_body,
     record_api_request,
-    record_exception_debug,
 )
 from core.diagnostics import attach_observation_diagnostics
-from core.timeouts import request_timeout_seconds
-from .base import CANONICAL_INSTRUCTION, GroundingProvider
+from .base import GroundingProvider
 from .microsoft_common import azure_credential, parse_responses_result
 from .model_catalog import MICROSOFT_FOUNDRY_WEB_SEARCH, model_field
 
@@ -91,12 +90,16 @@ class MicrosoftWebProvider(GroundingProvider):
         except Exception as exc:
             trace.event("http_request_failed")
             if debug:
-                run = self.new_run(request, model)
-                run.metadata["debug"] = {
-                    "context": build_run_debug_context(self.id, request, config),
-                    "trace": trace.events,
-                }
-                record_exception_debug(run, exc)
+                attach_debug_to_exception(
+                    exc,
+                    {
+                        "context": build_run_debug_context(self.id, request, config),
+                        "trace": trace.events,
+                        "api": "azure.foundry.responses",
+                        "operation": "responses.create",
+                        "request_body": request_body,
+                    },
+                )
             raise
         run = self.parse_response(response, request, model)
         run.latency_ms = round((perf_counter() - started) * 1000)

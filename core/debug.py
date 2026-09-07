@@ -103,6 +103,19 @@ def record_exception_debug(run: GroundingRun, exc: Exception) -> None:
     )
 
 
+def attach_debug_to_exception(exc: Exception, debug: dict[str, Any]) -> None:
+    """Carry sanitised provider diagnostics into the execution wrapper."""
+    try:
+        setattr(exc, "grounding_debug", redact_secrets(debug))
+    except (AttributeError, TypeError):
+        pass
+
+
+def exception_debug(exc: Exception) -> dict[str, Any]:
+    carried = getattr(exc, "grounding_debug", None)
+    return redact_secrets(carried) if isinstance(carried, dict) else {}
+
+
 def openai_request_body(model: str, request: GroundingRequest, tool: dict[str, Any]) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
 

@@ -17,6 +17,7 @@ from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_d
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
+from providers.responses_parsing import extract_query_text
 
 st.set_page_config(page_title="Grounding Source Observatory", page_icon="🔭", layout="wide")
 
@@ -665,7 +666,7 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
                 [
                     {
                         "Sequence": item.sequence,
-                        "Query": item.query,
+                        "Query": extract_query_text(item.query) or item.query,
                         "Action": item.metadata.get("action_type"),
                         "Search query URL": item.metadata.get("query_url"),
                     }

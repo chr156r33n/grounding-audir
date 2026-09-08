@@ -153,6 +153,17 @@ function renderSourceSection(title, caption, sources, emptyMessage) {
     .join("")}</div></div>`;
 }
 
+function formatGeneratedQueryItem(item) {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return "";
+  if (typeof item.query === "string") return item.query;
+  if (item.query && typeof item.query === "object") return formatGeneratedQueryItem(item.query);
+  for (const key of ["query", "search_query", "text", "q"]) {
+    if (typeof item[key] === "string") return item[key];
+  }
+  return "";
+}
+
 function renderRun(run) {
   const openedPages = (run.sources || []).filter((source) => source.sourceOrigin === "open_page");
   const listedSources = (run.sources || []).filter(
@@ -170,12 +181,18 @@ function renderRun(run) {
     : `<div><h4>Citations</h4><p class="muted">No inline URL citations were exposed. Check Opened pages if the provider opened target URLs during search.</p></div>`;
   const queries = run.generatedQueries?.length
     ? `<div><h4>Generated queries</h4><p class="muted">Search-tool queries with internal ws_call_id suffixes removed when present.</p><div class="link-list">${run.generatedQueries
-        .map(
-          (item) =>
-            `<span>${escapeHtml(item.query)}${
-              item.actionType ? ` · ${escapeHtml(item.actionType)}` : ""
-            }</span>`,
-        )
+        .map((item) => {
+          const query = formatGeneratedQueryItem(item);
+          if (!query) return "";
+          const actionType =
+            item && typeof item === "object" && typeof item.actionType === "string"
+              ? item.actionType
+              : "";
+          return `<span>${escapeHtml(query)}${
+            actionType ? ` · ${escapeHtml(actionType)}` : ""
+          }</span>`;
+        })
+        .filter(Boolean)
         .join("")}</div></div>`
     : "";
   const raw = run.rawResponse

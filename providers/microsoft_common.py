@@ -12,6 +12,7 @@ from .responses_parsing import (
     RESPONSES_INCLUDE_FIELDS,
     URL_FIELD_KEYS,
     collect_search_sources,
+    extract_query_text,
     extract_title,
     extract_url,
     normalize_generated_query,
@@ -98,7 +99,7 @@ def parse_responses_result(
             records = _query_records(action) + _query_records(arguments)
             seen_in_call: set[tuple[str, str | None]] = set()
             for query_value, query_url in records:
-                normalized_query = normalize_generated_query(query_value)
+                normalized_query = extract_query_text(query_value)
                 if not normalized_query:
                     continue
                 query_url_constructed = False
@@ -246,11 +247,18 @@ def _query_records(value: Any) -> list[tuple[str, str | None]]:
         )
         for key, item in value.items():
             normalized_key = key.lower()
-            if normalized_key in {"query", "search_query"} and isinstance(item, str):
-                records.append((item, query_url))
+            if normalized_key in {"query", "search_query"}:
+                text = extract_query_text(item)
+                if text:
+                    records.append((text, query_url))
+                elif isinstance(item, str):
+                    records.append((item, query_url))
             elif normalized_key in {"queries", "search_queries"} and isinstance(item, list):
                 for nested in item:
-                    if isinstance(nested, str):
+                    text = extract_query_text(nested)
+                    if text:
+                        records.append((text, None))
+                    elif isinstance(nested, str):
                         records.append((nested, None))
                     else:
                         records.extend(_query_records(nested))

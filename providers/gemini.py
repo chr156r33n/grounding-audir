@@ -16,6 +16,7 @@ from core.debug import (
 )
 from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 from .model_catalog import GEMINI_GOOGLE_SEARCH, model_field
+from .responses_parsing import extract_query_text
 
 
 class GeminiProvider(GroundingProvider):
@@ -100,10 +101,11 @@ class GeminiProvider(GroundingProvider):
                 search_calls += 1
                 arguments = step.get("arguments") or {}
                 for query in arguments.get("queries") or []:
-                    if query:
+                    text = extract_query_text(query)
+                    if text:
                         run.generated_queries.append(
                             GeneratedQuery(
-                                str(query),
+                                text,
                                 len(run.generated_queries) + 1,
                                 {
                                     "call_id": step.get("id"),

@@ -6,6 +6,7 @@ from providers.deepseek_web import DeepSeekWebProvider
 from providers.openai_web import OpenAIWebProvider
 from providers.responses_parsing import (
     collect_search_sources,
+    extract_query_text,
     extract_url,
     normalize_generated_query,
     parse_markdown_link_citations,
@@ -27,6 +28,13 @@ def test_normalize_generated_query_strips_ws_call_id_suffix():
         == "香港四季酒店 米其林"
     )
     assert normalize_generated_query("ws_call_id=call_only") is None
+    assert normalize_generated_query("[object Object]") is None
+
+
+def test_extract_query_text_reads_nested_query_objects():
+    assert extract_query_text({"query": "Four Seasons Hong Kong"}) == "Four Seasons Hong Kong"
+    assert extract_query_text({"search_query": "luxury hotels"}) == "luxury hotels"
+    assert extract_query_text([{"query": "ignored in list"}]) is None
 
 
 def test_collect_search_sources_reads_open_page_url():
@@ -53,8 +61,8 @@ def test_deepseek_open_page_urls_support_retrieval_without_citations(request):
                 "action": {
                     "type": "search",
                     "queries": [
-                        "Four Seasons Hotel Hong Kong",
-                        "香港四季酒店 ws_call_id=call_00_bad",
+                        {"query": "Four Seasons Hotel Hong Kong"},
+                        {"query": "香港四季酒店 ws_call_id=call_00_bad"},
                     ],
                 },
             },

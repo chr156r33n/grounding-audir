@@ -221,7 +221,11 @@ function parseResponses(
       const action = isRecord(item.action) ? item.action : {};
       const callStatus = stringValue(item.status);
       const actionType = stringValue(action.type);
-      for (const query of collectQueryRecords(action)) {
+      const argumentRecords = parseArgumentRecords(item.arguments);
+      for (const query of [
+        ...extractQueryRecords(action),
+        ...extractQueryRecords(argumentRecords),
+      ]) {
         const key = query.toLowerCase();
         if (seenQueries.has(key)) continue;
         seenQueries.add(key);
@@ -330,7 +334,7 @@ function parseGemini(
       const args = isRecord(step.arguments) ? step.arguments : {};
       if (Array.isArray(args.queries)) {
         for (const query of args.queries) {
-          const normalized = normalizeGeneratedQuery(String(query));
+          const normalized = extractQueryText(query);
           if (normalized) generatedQueries.push({ query: normalized, actionType: "search" });
         }
       }
@@ -452,21 +456,67 @@ function locationTool(market?: string) {
     : {};
 }
 
-function collectQueryRecords(value: Record<string, unknown>): string[] {
+function parseArgumentRecords(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function extractQueryText(value: unknown): string | undefined {
+  if (typeof value === "string") return normalizeGeneratedQuery(value);
+  if (typeof value === "number" || typeof value === "boolean") {
+    return normalizeGeneratedQuery(String(value));
+  }
+  if (isRecord(value)) {
+    for (const key of ["query", "search_query", "text", "q"]) {
+      if (!(key in value)) continue;
+      const text = extractQueryText(value[key]);
+      if (text) return text;
+    }
+  }
+  return undefined;
+}
+
+function extractQueryRecords(value: unknown): string[] {
   const results: string[] = [];
+  const push = (text?: string) => {
+    if (text && !results.includes(text)) results.push(text);
+  };
+
+  if (typeof value === "string") {
+    push(normalizeGeneratedQuery(value));
+    return results;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      for (const text of extractQueryRecords(item)) push(text);
+    }
+    return results;
+  }
+  if (!isRecord(value)) return results;
+
   for (const [key, item] of Object.entries(value)) {
     const normalizedKey = key.toLowerCase();
     if (normalizedKey === "query" || normalizedKey === "search_query") {
-      const normalized = normalizeGeneratedQuery(String(item));
-      if (normalized) results.push(normalized);
+      push(extractQueryText(item));
+      if (typeof item === "string") push(normalizeGeneratedQuery(item));
     } else if (
       (normalizedKey === "queries" || normalizedKey === "search_queries") &&
       Array.isArray(item)
     ) {
       for (const nested of item) {
-        const normalized = normalizeGeneratedQuery(String(nested));
-        if (normalized) results.push(normalized);
+        push(extractQueryText(nested));
+        if (!extractQueryText(nested)) {
+          for (const text of extractQueryRecords(nested)) push(text);
+        }
       }
+    } else if (isRecord(item) || Array.isArray(item)) {
+      for (const text of extractQueryRecords(item)) push(text);
     }
   }
   return results;
@@ -535,7 +585,8 @@ function recordsList(value: unknown): Record<string, unknown>[] {
 
 function normalizeGeneratedQuery(value: string) {
   const text = value.replace(/\s+/g, " ").trim().replace(/(?:^|[,\s;]+)ws_call_id=[^\s,;]+/gi, "").trim(" ,;");
-  return text && text.length <= 300 ? text : undefined;
+  if (!text || text.toLowerCase() === "[object object]" || text.length > 300) return undefined;
+  return text;
 }
 
 function marketLocale(request: RunRequest) {

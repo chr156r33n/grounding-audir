@@ -48,9 +48,25 @@ def extract_url(record: Any) -> str | None:
     return None
 
 
+def extract_query_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return normalize_generated_query(value)
+    if isinstance(value, (int, float, bool)):
+        return normalize_generated_query(str(value))
+    if isinstance(value, dict):
+        for key in ("query", "search_query", "text", "q"):
+            nested = value.get(key)
+            if nested is None:
+                continue
+            text = extract_query_text(nested)
+            if text:
+                return text
+    return None
+
+
 def normalize_generated_query(value: str) -> str | None:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
-    if not text:
+    if not text or text.lower() == "[object object]":
         return None
     text = _WS_CALL_ID_SUFFIX.sub("", text).strip(" ,;")
     if not text or len(text) > 300:

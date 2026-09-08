@@ -574,6 +574,33 @@ def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     )
 
 
+def _partition_sources(sources):
+    opened = [
+        item for item in sources if item.metadata.get("source_origin") == "open_page"
+    ]
+    listed = [
+        item for item in sources if item.metadata.get("source_origin") != "open_page"
+    ]
+    return opened, listed
+
+
+def _source_table_rows(sources):
+    return [
+        {
+            "Order": item.retrieval_position,
+            "Origin": item.metadata.get("source_origin", "source_list"),
+            "Domain": item.registrable_domain,
+            "URL": item.raw_url,
+            "Title": item.title,
+            "Call status": item.metadata.get("call_status"),
+            "Target match": bool(item.target_matches),
+            "Retrieved": STATE_LABELS[item.retrieved],
+            "Cited in answer": STATE_LABELS[item.cited],
+        }
+        for item in sources
+    ]
+
+
 def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
     with st.expander(run.provider_name):
         st.markdown("#### Summary")
@@ -630,11 +657,16 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
 
         st.markdown("#### Generated queries")
         if run.generated_queries:
+            st.caption(
+                "Queries emitted by the provider's search tool. Internal `ws_call_id` suffixes "
+                "are stripped when present."
+            )
             st.dataframe(
                 [
                     {
                         "Sequence": item.sequence,
                         "Query": item.query,
+                        "Action": item.metadata.get("action_type"),
                         "Search query URL": item.metadata.get("query_url"),
                     }
                     for item in run.generated_queries
@@ -648,30 +680,45 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
         else:
             st.info("Generated queries were not exposed in this response.")
 
-        st.markdown("#### Observed sources")
-        if run.sources:
+        opened_pages, listed_sources = _partition_sources(run.sources)
+
+        st.markdown("#### Opened pages")
+        st.caption(
+            "Pages the search tool opened during the run. These are retrieval/tool evidence "
+            "and are not the same as inline URL citations in the final answer."
+        )
+        if opened_pages:
             st.dataframe(
-                [
-                    {
-                        "Order": item.retrieval_position,
-                        "Domain": item.registrable_domain,
-                        "URL": item.raw_url,
-                        "Title": item.title,
-                        "Target match": bool(item.target_matches),
-                        "Retrieved": STATE_LABELS[item.retrieved],
-                        "Cited": STATE_LABELS[item.cited],
-                    }
-                    for item in run.sources
-                ],
+                _source_table_rows(opened_pages),
                 column_config={"URL": st.column_config.LinkColumn("URL")},
                 hide_index=True,
                 use_container_width=True,
             )
         else:
+            st.info("No `open_page` URLs were exposed in the provider response.")
+
+        st.markdown("#### Consulted source URLs")
+        st.caption(
+            "URLs returned in explicit consulted-source lists such as "
+            "`web_search_call.action.sources` when the provider exposes them."
+        )
+        if listed_sources:
+            st.dataframe(
+                _source_table_rows(listed_sources),
+                column_config={"URL": st.column_config.LinkColumn("URL")},
+                hide_index=True,
+                use_container_width=True,
+            )
+        elif not opened_pages:
             st.info(
                 state_notes.get("target_retrieved")
                 or run.metadata.get("retrieval_note")
                 or "No retrieved-source list was exposed by this provider/API."
+            )
+        else:
+            st.info(
+                "No explicit consulted-source list was returned. Use Opened pages above for "
+                "tool-level URL evidence."
             )
 
         st.markdown("#### Grounding content / chunks")
@@ -702,7 +749,10 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
                 use_container_width=True,
             )
         else:
-            st.info("No citation URLs were exposed in this response.")
+            st.info(
+                "No inline URL citations were exposed in the final answer. Check Opened pages "
+                "above if the provider opened target URLs during search."
+            )
         anchor_references = run.metadata.get("anchor_references") or []
         if anchor_references:
             st.markdown("#### Anchor references without URLs")

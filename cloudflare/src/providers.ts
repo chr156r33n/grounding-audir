@@ -1,6 +1,7 @@
 import type {
   Citation,
   Env,
+  GeneratedQuery,
   ProviderId,
   ProviderRun,
   RunRequest,
@@ -203,13 +204,14 @@ function parseResponses(
 ): ProviderRun {
   const payload = isRecord(raw) ? raw : {};
   const output = Array.isArray(payload.output) ? payload.output : [];
-  const generatedQueries: string[] = [];
+  const generatedQueries: GeneratedQuery[] = [];
   const sources: Source[] = [];
   const citations: Citation[] = [];
   const textParts: string[] = [];
   let searchCalls = 0;
   let sourcesObservable = false;
   let anchorReferences = 0;
+  const seenQueries = new Set<string>();
 
   for (const item of output) {
     if (!isRecord(item)) continue;
@@ -217,23 +219,17 @@ function parseResponses(
     if (type === "web_search_call" || type === "bing_grounding_call") {
       searchCalls += 1;
       const action = isRecord(item.action) ? item.action : {};
-      const query = action.query || action.search_query;
-      if (typeof query === "string") generatedQueries.push(query);
-      for (const key of ["sources", "results", "pages", "items"]) {
-        if (!(key in action)) continue;
+      const callStatus = stringValue(item.status);
+      const actionType = stringValue(action.type);
+      for (const query of collectQueryRecords(action)) {
+        const key = query.toLowerCase();
+        if (seenQueries.has(key)) continue;
+        seenQueries.add(key);
+        generatedQueries.push({ query, actionType, callStatus });
+      }
+      for (const record of collectSearchSourceRecords(item)) {
+        appendSource(sources, request, record, callStatus, actionType);
         sourcesObservable = true;
-        for (const record of records(action[key])) {
-          const url = recordUrl(record);
-          if (!url || sources.some((source) => source.url === url)) continue;
-          sources.push({
-            url,
-            title: stringValue(record.title || record.name),
-            snippet: stringValue(record.snippet || record.description),
-            position: sources.length + 1,
-            targetMatch: targetMatches(request, url),
-            cited: "NO",
-          });
-        }
       }
     }
     if (type !== "message" || !Array.isArray(item.content)) continue;
@@ -286,11 +282,13 @@ function parseResponses(
     status: "complete",
     latencyMs,
     searchPerformed: searchCalls ? "YES" : output.length ? "NO" : "UNKNOWN",
-    targetRetrieved: sourcesObservable
+    targetRetrieved: sources.length
       ? sources.some((source) => source.targetMatch)
         ? "YES"
         : "NO"
-      : "UNKNOWN",
+      : sourcesObservable
+        ? "NO"
+        : "UNKNOWN",
     targetCited: citations.some((citation) => citation.targetMatch)
       ? "YES"
       : anchorReferences
@@ -306,6 +304,8 @@ function parseResponses(
       usage: payload.usage,
       sourcesObservable,
       anchorReferencesWithoutUrl: anchorReferences,
+      openedPageCount: sources.filter((source) => source.sourceOrigin === "open_page").length,
+      sourceListCount: sources.filter((source) => source.sourceOrigin === "source_list").length,
     },
     ...(request.debug ? { rawResponse: raw } : {}),
   };
@@ -319,7 +319,7 @@ function parseGemini(
 ): ProviderRun {
   const payload = isRecord(raw) ? raw : {};
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
-  const generatedQueries: string[] = [];
+  const generatedQueries: GeneratedQuery[] = [];
   const citations: Citation[] = [];
   const textParts: string[] = [];
   let searchCalls = 0;
@@ -329,7 +329,10 @@ function parseGemini(
       searchCalls += 1;
       const args = isRecord(step.arguments) ? step.arguments : {};
       if (Array.isArray(args.queries)) {
-        generatedQueries.push(...args.queries.filter((q): q is string => typeof q === "string"));
+        for (const query of args.queries) {
+          const normalized = normalizeGeneratedQuery(String(query));
+          if (normalized) generatedQueries.push({ query: normalized, actionType: "search" });
+        }
       }
     }
     if (step.type !== "model_output" || !Array.isArray(step.content)) continue;
@@ -402,7 +405,7 @@ function parseWebIq(
     searchPerformed: items.length ? "YES" : "NO",
     targetRetrieved: sources.some((source) => source.targetMatch) ? "YES" : "NO",
     targetCited: "N/A",
-    generatedQueries: [request.query],
+    generatedQueries: [{ query: request.query, actionType: "input" }],
     sources,
     citations: [],
     metadata: { resultCount: sources.length },
@@ -432,14 +435,6 @@ function targetMatches(request: RunRequest, candidate: string) {
   }
 }
 
-function records(value: unknown): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value.filter(isRecord);
-  if (isRecord(value)) {
-    return Object.values(value).flatMap((item) => (Array.isArray(item) ? item.filter(isRecord) : []));
-  }
-  return [];
-}
-
 function recordUrl(record: Record<string, unknown>) {
   for (const key of ["url", "link", "href", "source_url", "uri", "source"]) {
     if (typeof record[key] === "string" && /^https?:\/\//i.test(record[key])) {
@@ -455,6 +450,92 @@ function locationTool(market?: string) {
   return country?.length === 2
     ? { user_location: { type: "approximate", country: country.toUpperCase() } }
     : {};
+}
+
+function collectQueryRecords(value: Record<string, unknown>): string[] {
+  const results: string[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === "query" || normalizedKey === "search_query") {
+      const normalized = normalizeGeneratedQuery(String(item));
+      if (normalized) results.push(normalized);
+    } else if (
+      (normalizedKey === "queries" || normalizedKey === "search_queries") &&
+      Array.isArray(item)
+    ) {
+      for (const nested of item) {
+        const normalized = normalizeGeneratedQuery(String(nested));
+        if (normalized) results.push(normalized);
+      }
+    }
+  }
+  return results;
+}
+
+function collectSearchSourceRecords(item: Record<string, unknown>) {
+  const action = isRecord(item.action) ? item.action : {};
+  const records: Array<Record<string, unknown>> = [];
+  for (const key of ["sources", "results", "pages", "items"]) {
+    if (!(key in action)) continue;
+    for (const record of recordsList(action[key])) {
+      records.push({ ...record, sourceOrigin: "source_list" });
+    }
+  }
+  const actionUrl = recordUrl(action);
+  if (actionUrl) {
+    records.push({
+      ...action,
+      url: actionUrl,
+      sourceOrigin: String(action.type || "").toLowerCase() === "open_page" ? "open_page" : "action",
+    });
+  }
+  for (const key of ["results", "sources"]) {
+    if (!(key in item)) continue;
+    for (const record of recordsList(item[key])) {
+      records.push({ ...record, sourceOrigin: "source_list" });
+    }
+  }
+  return records;
+}
+
+function appendSource(
+  sources: Source[],
+  request: RunRequest,
+  record: Record<string, unknown>,
+  callStatus?: string,
+  actionType?: string,
+) {
+  const url = recordUrl(record);
+  if (!url || sources.some((source) => source.url === url)) return;
+  const origin = record.sourceOrigin === "open_page"
+    ? "open_page"
+    : record.sourceOrigin === "action"
+      ? "action"
+      : "source_list";
+  sources.push({
+    url,
+    title: stringValue(record.title || record.name),
+    snippet: stringValue(record.snippet || record.description),
+    position: sources.length + 1,
+    targetMatch: targetMatches(request, url),
+    cited: "NO",
+    sourceOrigin: origin,
+    callStatus,
+    actionType,
+  });
+}
+
+function recordsList(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.filter(isRecord);
+  if (isRecord(value)) {
+    return Object.values(value).flatMap((item) => (Array.isArray(item) ? item.filter(isRecord) : []));
+  }
+  return [];
+}
+
+function normalizeGeneratedQuery(value: string) {
+  const text = value.replace(/\s+/g, " ").trim().replace(/(?:^|[,\s;]+)ws_call_id=[^\s,;]+/gi, "").trim(" ,;");
+  return text && text.length <= 300 ? text : undefined;
 }
 
 function marketLocale(request: RunRequest) {

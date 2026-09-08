@@ -137,19 +137,29 @@ function renderResults(result) {
   results.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function renderSourceSection(title, caption, sources, emptyMessage) {
+  if (!sources.length) {
+    return `<div><h4>${title}</h4><p class="muted">${emptyMessage}</p></div>`;
+  }
+  return `<div><h4>${title}</h4><p class="muted">${caption}</p><div class="link-list">${sources
+    .map(
+      (source) =>
+        `<a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener">${escapeHtml(
+          source.title || source.url,
+        )}${source.callStatus ? ` · ${escapeHtml(source.callStatus)}` : ""}${
+          source.targetMatch ? " · TARGET" : ""
+        }</a>`,
+    )
+    .join("")}</div></div>`;
+}
+
 function renderRun(run) {
-  const sources = run.sources?.length
-    ? `<div><h4>Consulted sources</h4><div class="link-list">${run.sources
-        .map(
-          (source) =>
-            `<a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener">${escapeHtml(
-              source.title || source.url,
-            )}${source.targetMatch ? " · TARGET" : ""}</a>`,
-        )
-        .join("")}</div></div>`
-    : "";
+  const openedPages = (run.sources || []).filter((source) => source.sourceOrigin === "open_page");
+  const listedSources = (run.sources || []).filter(
+    (source) => source.sourceOrigin !== "open_page",
+  );
   const citations = run.citations?.length
-    ? `<div><h4>Citations</h4><div class="link-list">${run.citations
+    ? `<div><h4>Citations</h4><p class="muted">Inline URL citations exposed in the final answer.</p><div class="link-list">${run.citations
         .map(
           (citation) =>
             `<a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
@@ -157,9 +167,16 @@ function renderRun(run) {
             )}${citation.targetMatch ? " · TARGET" : ""}</a>`,
         )
         .join("")}</div></div>`
-    : "";
+    : `<div><h4>Citations</h4><p class="muted">No inline URL citations were exposed. Check Opened pages if the provider opened target URLs during search.</p></div>`;
   const queries = run.generatedQueries?.length
-    ? `<div><h4>Generated queries</h4><p>${run.generatedQueries.map(escapeHtml).join(" · ")}</p></div>`
+    ? `<div><h4>Generated queries</h4><p class="muted">Search-tool queries with internal ws_call_id suffixes removed when present.</p><div class="link-list">${run.generatedQueries
+        .map(
+          (item) =>
+            `<span>${escapeHtml(item.query)}${
+              item.actionType ? ` · ${escapeHtml(item.actionType)}` : ""
+            }</span>`,
+        )
+        .join("")}</div></div>`
     : "";
   const raw = run.rawResponse
     ? `<div><h4>Raw response</h4><pre>${escapeHtml(JSON.stringify(run.rawResponse, null, 2))}</pre></div>`
@@ -172,7 +189,22 @@ function renderRun(run) {
       </summary>
       <div class="detail-body">
         ${run.error ? `<p class="error">${escapeHtml(run.error)}</p>` : ""}
-        ${queries}${sources}${citations}
+        ${queries}
+        ${renderSourceSection(
+          "Opened pages",
+          "Pages the search tool opened during the run. These are retrieval evidence, not inline citations.",
+          openedPages,
+          "No open_page URLs were exposed.",
+        )}
+        ${renderSourceSection(
+          "Consulted source URLs",
+          "URLs from explicit consulted-source lists when the provider exposes them.",
+          listedSources,
+          openedPages.length
+            ? "No explicit consulted-source list was returned."
+            : "No consulted-source URLs were exposed.",
+        )}
+        ${citations}
         ${run.responseText ? `<div><h4>Grounded response</h4><p>${escapeHtml(run.responseText)}</p></div>` : ""}
         ${raw}
       </div>

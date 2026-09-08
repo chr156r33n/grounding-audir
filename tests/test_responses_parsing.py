@@ -7,6 +7,7 @@ from providers.openai_web import OpenAIWebProvider
 from providers.responses_parsing import (
     collect_search_sources,
     extract_url,
+    normalize_generated_query,
     parse_markdown_link_citations,
 )
 
@@ -18,6 +19,72 @@ def request():
         input_phrase="best luxury hotels in hong kong",
         targets=[Target("fourseasons.com", MatchMode.ROOT_DOMAIN)],
     )
+
+
+def test_normalize_generated_query_strips_ws_call_id_suffix():
+    assert (
+        normalize_generated_query("香港四季酒店 米其林 ws_call_id=call_00_abc")
+        == "香港四季酒店 米其林"
+    )
+    assert normalize_generated_query("ws_call_id=call_only") is None
+
+
+def test_collect_search_sources_reads_open_page_url():
+    item = {
+        "type": "web_search_call",
+        "status": "completed",
+        "action": {
+            "type": "open_page",
+            "url": "https://www.fourseasons.com/zh/hongkong/#ws_call_id=call_01",
+        },
+    }
+    records, fields = collect_search_sources(item)
+    assert extract_url(records[0]) == "https://www.fourseasons.com/zh/hongkong/#ws_call_id=call_01"
+    assert records[0]["source_origin"] == "open_page"
+    assert "action" in fields
+
+
+def test_deepseek_open_page_urls_support_retrieval_without_citations(request):
+    fixture = {
+        "output": [
+            {
+                "type": "web_search_call",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "queries": [
+                        "Four Seasons Hotel Hong Kong",
+                        "香港四季酒店 ws_call_id=call_00_bad",
+                    ],
+                },
+            },
+            {
+                "type": "web_search_call",
+                "status": "completed",
+                "action": {
+                    "type": "open_page",
+                    "url": "https://www.fourseasons.com/zh/hongkong/",
+                },
+            },
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "香港四季酒店位於中環。",
+                        "annotations": [],
+                    }
+                ],
+            },
+        ]
+    }
+    run = DeepSeekWebProvider().parse_response(fixture, request)
+    assert run.target_retrieved is ObservationState.YES
+    assert run.target_cited is ObservationState.NO
+    assert [item.query for item in run.generated_queries] == ["Four Seasons Hotel Hong Kong", "香港四季酒店"]
+    opened = [source for source in run.sources if source.metadata.get("source_origin") == "open_page"]
+    assert len(opened) == 1
+    assert run.metadata["parsing_summary"]["opened_page_count"] == 1
 
 
 def test_collect_search_sources_reads_results_field():

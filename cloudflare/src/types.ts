@@ -44,6 +44,12 @@ export interface Citation {
   targetMatch: boolean;
 }
 
+export interface GeneratedQuery {
+  query: string;
+  actionType?: string;
+  callStatus?: string;
+}
+
 export interface Source {
   url: string;
   title?: string;
@@ -51,6 +57,9 @@ export interface Source {
   position?: number;
   targetMatch: boolean;
   cited: ObservationState;
+  sourceOrigin?: "open_page" | "source_list" | "action";
+  callStatus?: string;
+  actionType?: string;
 }
 
 export interface ProviderRun {
@@ -62,7 +71,7 @@ export interface ProviderRun {
   searchPerformed: ObservationState;
   targetRetrieved: ObservationState;
   targetCited: ObservationState;
-  generatedQueries: string[];
+  generatedQueries: GeneratedQuery[];
   sources: Source[];
   citations: Citation[];
   responseText?: string;

@@ -30,6 +30,7 @@ RESPONSES_INCLUDE_FIELDS = (
     "web_search_call.results",
 )
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_WS_CALL_ID_SUFFIX = re.compile(r"(?:^|[,\s;]+)ws_call_id=[^\s,;]+", re.I)
 
 
 def extract_url(record: Any) -> str | None:
@@ -45,6 +46,16 @@ def extract_url(record: Any) -> str | None:
     if isinstance(nested, dict):
         return extract_url(nested)
     return None
+
+
+def normalize_generated_query(value: str) -> str | None:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return None
+    text = _WS_CALL_ID_SUFFIX.sub("", text).strip(" ,;")
+    if not text or len(text) > 300:
+        return None
+    return text
 
 
 def extract_title(record: dict[str, Any]) -> str | None:
@@ -84,7 +95,12 @@ def collect_search_sources(item: dict[str, Any]) -> tuple[list[dict[str, Any]], 
                 records.extend(iter_source_records(action.get(key)))
         if extract_url(action):
             observed_fields.append("action")
-            records.append(action)
+            origin = (
+                "open_page"
+                if str(action.get("type") or "").lower() == "open_page"
+                else "action"
+            )
+            records.append({**action, "source_origin": origin})
     for key in ("results", "sources"):
         if key in item:
             observed_fields.append(key)

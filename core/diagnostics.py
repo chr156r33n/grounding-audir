@@ -82,6 +82,14 @@ def _retrieval_note(run: GroundingRun) -> str:
         )
     if state is ObservationState.NO:
         if source_count:
+            opened = sum(
+                1 for source in run.sources if source.metadata.get("source_origin") == "open_page"
+            )
+            if opened:
+                return (
+                    f"The provider exposed {source_count} URL(s), including {opened} opened "
+                    "page(s), and none matched the configured target."
+                )
             return (
                 f"The provider exposed {source_count} consulted source URL(s), and none matched "
                 "the configured target."
@@ -98,14 +106,24 @@ def _retrieval_note(run: GroundingRun) -> str:
     if retrieval_note:
         base = str(retrieval_note)
     elif sources_observable is False and run.search_performed is ObservationState.YES:
-        include_fields = run.metadata.get("include_fields") or [
-            "web_search_call.action.sources"
-        ]
-        base = (
-            "Search ran, but the response omitted the consulted-source field "
-            f"({', '.join(include_fields)}). Without that field, the app cannot confirm or "
-            "rule out target retrieval."
+        opened = sum(
+            1 for source in run.sources if source.metadata.get("source_origin") == "open_page"
         )
+        if opened:
+            base = (
+                f"Search ran and exposed {opened} opened page URL(s), but the provider omitted "
+                "the full consulted-source list. Opened pages are shown separately from inline "
+                "citations."
+            )
+        else:
+            include_fields = run.metadata.get("include_fields") or [
+                "web_search_call.action.sources"
+            ]
+            base = (
+                "Search ran, but the response omitted the consulted-source field "
+                f"({', '.join(include_fields)}). Without that field, the app cannot confirm or "
+                "rule out target retrieval."
+            )
     elif run.search_performed is ObservationState.NO:
         base = (
             "No search call was parsed, so there is no retrieval evidence to inspect."
@@ -141,6 +159,16 @@ def _citation_note(run: GroundingRun) -> str:
             return (
                 f"The provider returned {citation_count} citation URL(s), and none matched "
                 "the configured target."
+            )
+        opened_matches = sum(
+            1
+            for source in run.sources
+            if source.metadata.get("source_origin") == "open_page" and source.target_matches
+        )
+        if opened_matches:
+            return (
+                f"The provider opened {opened_matches} target-matching page URL(s) during "
+                "search, but no inline URL citations were exposed in the final answer."
             )
         anchor_count = len(run.metadata.get("anchor_references") or [])
         if anchor_count:

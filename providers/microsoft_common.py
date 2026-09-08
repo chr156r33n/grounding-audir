@@ -14,6 +14,7 @@ from .responses_parsing import (
     collect_search_sources,
     extract_title,
     extract_url,
+    normalize_generated_query,
     parse_markdown_link_citations,
     parse_structured_annotations,
 )
@@ -97,24 +98,28 @@ def parse_responses_result(
             records = _query_records(action) + _query_records(arguments)
             seen_in_call: set[tuple[str, str | None]] = set()
             for query_value, query_url in records:
+                normalized_query = normalize_generated_query(query_value)
+                if not normalized_query:
+                    continue
                 query_url_constructed = False
                 if not query_url and provider.id == "microsoft_bing":
-                    query_url = f"https://www.bing.com/search?q={quote_plus(query_value)}"
+                    query_url = f"https://www.bing.com/search?q={quote_plus(normalized_query)}"
                     query_url_constructed = True
-                key = (query_value, query_url)
+                key = (normalized_query, query_url)
                 if key in seen_in_call:
                     continue
                 seen_in_call.add(key)
                 query_metadata = {
                     "call_id": item.get("call_id") or item.get("id"),
                     "status": item.get("status"),
+                    "action_type": action.get("type"),
                 }
                 if query_url:
                     query_metadata["query_url"] = query_url
                     query_metadata["query_url_constructed"] = query_url_constructed
                 run.generated_queries.append(
                     GeneratedQuery(
-                        query_value,
+                        normalized_query,
                         len(run.generated_queries) + 1,
                         query_metadata,
                     )
@@ -139,6 +144,12 @@ def parse_responses_result(
                             key: value
                             for key, value in source.items()
                             if key not in URL_FIELD_KEYS and key != "title"
+                        }
+                        | {
+                            "source_origin": source.get("source_origin") or "source_list",
+                            "action_type": action.get("type"),
+                            "call_id": item.get("call_id") or item.get("id"),
+                            "call_status": item.get("status"),
                         },
                     )
                     key = built.normalized_url or built.raw_url
@@ -197,6 +208,14 @@ def parse_responses_result(
             "markdown_citations": markdown_citation_count,
             "anchor_references_without_url": len(anchor_references),
             "observed_source_count": len(run.sources),
+            "opened_page_count": sum(
+                1 for source in run.sources if source.metadata.get("source_origin") == "open_page"
+            ),
+            "source_list_count": sum(
+                1
+                for source in run.sources
+                if source.metadata.get("source_origin", "source_list") == "source_list"
+            ),
         },
         "citation_urls_observable": bool(structured_citation_count or markdown_citation_count),
         "response_id": raw.get("id"),

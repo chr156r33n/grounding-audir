@@ -28,6 +28,27 @@ def test_openai_unknown_retrieval_explains_missing_sources():
     assert "unknown" in note.lower() or "cannot confirm" in note.lower()
 
 
+def test_citation_note_mentions_opened_pages_without_inline_citations(request):
+    run = GroundingRun(
+        run_id="opened",
+        provider_id="deepseek_web",
+        provider_name="DeepSeek Web Search",
+        provider_type=OpenAIWebProvider.provider_type,
+        input_phrase="query",
+        target_cited=ObservationState.NO,
+        sources=[
+            OpenAIWebProvider().build_source(
+                request,
+                "https://www.fourseasons.com/zh/hongkong/",
+                metadata={"source_origin": "open_page"},
+            )
+        ],
+    )
+    note = build_state_notes(run)["target_cited"]
+    assert "opened" in note.lower()
+    assert "inline url citations" in note.lower()
+
+
 def test_failed_run_unknown_states_include_failure_reason():
     run = GroundingRun(
         run_id="fail",

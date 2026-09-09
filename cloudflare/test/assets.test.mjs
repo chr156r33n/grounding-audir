@@ -8,6 +8,8 @@ test("edge UI exposes run and discovery controls", async () => {
   assert.match(html, /id="discover-button"/);
   assert.match(html, /Discover queries/);
   assert.match(html, /id="results"/);
+  assert.match(html, /<select id="market"/);
+  assert.match(html, /<select id="language"/);
   assert.match(html, /Torque Partnership/);
   assert.match(html, /Turning Digital/);
 });
@@ -25,6 +27,14 @@ test("styles use Torque blue palette not orange accents", async () => {
   assert.match(css, /--blue:/);
   assert.match(css, /--navy:/);
   assert.doesNotMatch(css, /#e8622a|orange/i);
+});
+
+test("client supports multi-phrase runs and candidate toggles", async () => {
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(script, /function splitInputPhrases/);
+  assert.match(script, /function toggleCandidateQuery/);
+  assert.match(script, /selectedCandidateQueries/);
+  assert.match(script, /result\.batches/);
 });
 
 test("client calls only same-origin API routes", async () => {

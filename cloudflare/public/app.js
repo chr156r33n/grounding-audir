@@ -1,6 +1,53 @@
 const $ = (selector) => document.querySelector(selector);
 let lastResult = null;
 let lastRuns = [];
+let lastDiscoveryCandidates = [];
+let selectedCandidateQueries = new Set();
+
+function splitInputPhrases(value) {
+  return String(value || "")
+    .split(/[\n,]+/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((phrase, index, items) => items.findIndex((item) => item.toLowerCase() === phrase.toLowerCase()) === index);
+}
+
+function syncQueryFieldFromSelection() {
+  const ordered = lastDiscoveryCandidates
+    .map((candidate) => candidate.query)
+    .filter((query) => selectedCandidateQueries.has(query));
+  $("#query").value = ordered.join("\n");
+}
+
+function updateCandidateButtonStates() {
+  document.querySelectorAll(".candidate button[data-query]").forEach((button) => {
+    const query = decodeURIComponent(button.dataset.query);
+    const selected = selectedCandidateQueries.has(query);
+    button.classList.toggle("is-selected", selected);
+    button.textContent = selected ? "Selected" : "Use";
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+}
+
+function syncSelectionFromQueryField() {
+  const lines = new Set(splitInputPhrases($("#query").value));
+  selectedCandidateQueries = new Set(
+    lastDiscoveryCandidates.map((candidate) => candidate.query).filter((query) => lines.has(query)),
+  );
+  updateCandidateButtonStates();
+}
+
+function toggleCandidateQuery(encodedQuery) {
+  const query = decodeURIComponent(encodedQuery);
+  if (selectedCandidateQueries.has(query)) {
+    selectedCandidateQueries.delete(query);
+  } else {
+    selectedCandidateQueries.add(query);
+  }
+  syncQueryFieldFromSelection();
+  updateCandidateButtonStates();
+  $("#query").focus();
+}
 
 async function api(path, options) {
   const response = await fetch(path, {
@@ -43,23 +90,38 @@ $("#run-form").addEventListener("submit", async (event) => {
   const error = $("#form-error");
   error.textContent = "";
   button.disabled = true;
-  button.querySelector("span").textContent = "Running providers…";
+  const phrases = splitInputPhrases($("#query").value);
+  if (!phrases.length) {
+    error.textContent = "Enter at least one grounding/search phrase.";
+    button.disabled = false;
+    return;
+  }
+  button.querySelector("span").textContent =
+    phrases.length > 1 ? `Running ${phrases.length} phrases…` : "Running providers…";
   try {
     const providers = [...document.querySelectorAll('input[name="provider"]:checked')].map(
       (input) => input.value,
     );
-    lastResult = await api("/api/run", {
-      method: "POST",
-      body: JSON.stringify({
-        query: $("#query").value,
-        target: $("#target").value,
-        matchMode: $("#match-mode").value,
-        market: $("#market").value,
-        language: $("#language").value,
-        debug: $("#debug").checked,
-        providers,
-      }),
-    });
+    const shared = {
+      target: $("#target").value,
+      matchMode: $("#match-mode").value,
+      market: $("#market").value,
+      language: $("#language").value,
+      debug: $("#debug").checked,
+      providers,
+    };
+    const batches = [];
+    for (const [index, query] of phrases.entries()) {
+      if (phrases.length > 1) {
+        button.querySelector("span").textContent = `Running phrase ${index + 1} of ${phrases.length}…`;
+      }
+      const result = await api("/api/run", {
+        method: "POST",
+        body: JSON.stringify({ ...shared, query }),
+      });
+      batches.push({ query, ...result });
+    }
+    lastResult = batches.length === 1 ? batches[0] : { batches };
     renderResults(lastResult);
   } catch (caught) {
     error.textContent = caught.message;
@@ -68,6 +130,8 @@ $("#run-form").addEventListener("submit", async (event) => {
     button.querySelector("span").textContent = "Run observatory";
   }
 });
+
+$("#query").addEventListener("input", syncSelectionFromQueryField);
 
 $("#discover-button").addEventListener("click", async () => {
   const button = $("#discover-button");
@@ -84,6 +148,8 @@ $("#discover-button").addEventListener("click", async () => {
         count: 6,
       }),
     });
+    lastDiscoveryCandidates = result.candidates || [];
+    selectedCandidateQueries = new Set();
     $("#term-list").innerHTML = result.keyTerms
       .map((term) => `<span class="term">${escapeHtml(term)}</span>`)
       .join("");
@@ -104,7 +170,7 @@ $("#discover-button").addEventListener("click", async () => {
                   : ""
               }
             </div>
-            <button type="button" data-query="${encodeURIComponent(candidate.query)}">Use</button>
+            <button type="button" data-query="${encodeURIComponent(candidate.query)}" aria-pressed="false">Use</button>
           </div>`,
       )
       .join("");
@@ -114,12 +180,10 @@ $("#discover-button").addEventListener("click", async () => {
       throw new Error(result.error);
     }
     $("#discovery-results").hidden = false;
-    document.querySelectorAll(".candidate button").forEach((item) => {
-      item.addEventListener("click", () => {
-        $("#query").value = decodeURIComponent(item.dataset.query);
-        $("#query").focus();
-      });
+    document.querySelectorAll(".candidate button[data-query]").forEach((item) => {
+      item.addEventListener("click", () => toggleCandidateQuery(item.dataset.query));
     });
+    syncSelectionFromQueryField();
   } catch (caught) {
     error.textContent = caught.message;
   } finally {
@@ -133,25 +197,70 @@ $("#download-button").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: "application/json" });
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
-  anchor.download = `grounding-run-${lastResult.runId}.json`;
+  anchor.download = `grounding-run-${lastResult.batches?.[0]?.runId || lastResult.runId || "grounding-run"}.json`;
   anchor.click();
   URL.revokeObjectURL(anchor.href);
 });
 
 function renderResults(result) {
   const results = $("#results");
-  lastRuns = result.runs;
-  $("#summary-grid").innerHTML = result.runs
-    .map(
-      (run) => `
-        <article class="summary-card">
-          <h3>${escapeHtml(run.providerName)}</h3>
-          <div class="state ${run.targetCited}">${run.targetCited}</div>
-          <small>target cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
-        </article>`,
-    )
-    .join("");
-  $("#run-details").innerHTML = result.runs.map((run, index) => renderRunShell(run, index)).join("");
+  if (result.batches?.length) {
+    lastRuns = result.batches.flatMap((batch) =>
+      (batch.runs || []).map((run) => ({ ...run, inputQuery: batch.query })),
+    );
+    $("#summary-grid").innerHTML = result.batches
+      .map(
+        (batch) => `
+          <section class="query-batch">
+            <p class="query-batch-label">${escapeHtml(batch.query)}</p>
+            <div class="summary-grid-inner">
+              ${(batch.runs || [])
+                .map(
+                  (run) => `
+                    <article class="summary-card">
+                      <h3>${escapeHtml(run.providerName)}</h3>
+                      <div class="state ${run.targetCited}">${run.targetCited}</div>
+                      <small>target cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
+                    </article>`,
+                )
+                .join("")}
+            </div>
+          </section>`,
+      )
+      .join("");
+    let runIndex = 0;
+    $("#run-details").innerHTML = result.batches
+      .map(
+        (batch) => `
+          <section class="query-batch">
+            <p class="query-batch-label">${escapeHtml(batch.query)}</p>
+            ${(batch.runs || [])
+              .map(() => {
+                const index = runIndex;
+                runIndex += 1;
+                return renderRunShell(lastRuns[index], index);
+              })
+              .join("")}
+          </section>`,
+      )
+      .join("");
+  } else {
+    lastRuns = result.runs || [];
+    $("#summary-grid").innerHTML = `
+      <div class="summary-grid-inner">
+        ${result.runs
+          .map(
+            (run) => `
+              <article class="summary-card">
+                <h3>${escapeHtml(run.providerName)}</h3>
+                <div class="state ${run.targetCited}">${run.targetCited}</div>
+                <small>target cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
+              </article>`,
+          )
+          .join("")}
+      </div>`;
+    $("#run-details").innerHTML = result.runs.map((run, index) => renderRunShell(run, index)).join("");
+  }
   bindLazyRunPanels();
   results.hidden = false;
   results.scrollIntoView({ block: "start" });

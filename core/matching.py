@@ -133,3 +133,49 @@ def target_matches_url(target: Target, candidate_url: str) -> bool:
 
 def matching_targets(targets: list[Target], candidate_url: str) -> list[str]:
     return [target.value for target in targets if target_matches_url(target, candidate_url)]
+
+
+def is_grounding_redirect_url(value: str) -> bool:
+    lowered = value.lower()
+    if "grounding-api-redirect" in lowered:
+        return True
+    host = _hostname(value)
+    return bool(host and host.endswith("vertexaisearch.cloud.google.com"))
+
+
+def citation_target_hints(*values: str | None) -> list[str]:
+    hints: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        if not cleaned:
+            continue
+        candidates = [cleaned]
+        if "/" in cleaned:
+            candidates.append(cleaned.split("/")[0])
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            hints.append(candidate if "://" in candidate else f"https://{candidate}")
+    return hints
+
+
+def matching_targets_for_citation(
+    targets: list[Target],
+    url: str,
+    *,
+    title: str | None = None,
+    cited_text: str | None = None,
+) -> list[str]:
+    matches = matching_targets(targets, url)
+    if matches or not is_grounding_redirect_url(url):
+        return matches
+    for hint in citation_target_hints(cited_text, title):
+        matches = matching_targets(targets, hint)
+        if matches:
+            return matches
+    return []

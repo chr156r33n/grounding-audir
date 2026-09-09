@@ -7,6 +7,11 @@ import type {
   RunRequest,
   Source,
 } from "./types.ts";
+import {
+  parseHtmlLinkCitations,
+  parseMarkdownLinkCitations,
+  targetMatchesCitation,
+} from "./citations.ts";
 import { getDomain } from "tldts";
 
 const NAMES: Record<ProviderId, string> = {
@@ -259,7 +264,15 @@ function parseResponses(
             url,
             title: stringValue(annotation.title || annotation.name),
             citedText: sliceText(text, annotation.start_index, annotation.end_index),
-            targetMatch: targetMatches(request, url),
+            targetMatch: targetMatchesCitation(
+              request,
+              url,
+              targetMatches,
+              sliceText(text, annotation.start_index, annotation.end_index) ||
+                stringValue(annotation.title || annotation.name),
+            )
+              ? "YES"
+              : "NO",
           });
         }
       }
@@ -267,14 +280,7 @@ function parseResponses(
   }
   const responseText = textParts.join("\n") || stringValue(payload.output_text);
   if (!citations.length && responseText) {
-    for (const match of responseText.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
-      citations.push({
-        url: match[2],
-        title: match[1],
-        citedText: match[1],
-        targetMatch: targetMatches(request, match[2]),
-      });
-    }
+    citations.push(...parseMarkdownLinkCitations(responseText, request, targetMatches));
   }
   for (const source of sources) {
     if (citations.some((citation) => citation.url === source.url)) source.cited = "YES";
@@ -325,8 +331,16 @@ function parseGemini(
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
   const generatedQueries: GeneratedQuery[] = [];
   const citations: Citation[] = [];
+  const seenCitationUrls = new Set<string>();
   const textParts: string[] = [];
   let searchCalls = 0;
+
+  const pushCitation = (citation: Citation) => {
+    if (seenCitationUrls.has(citation.url)) return;
+    seenCitationUrls.add(citation.url);
+    citations.push(citation);
+  };
+
   for (const step of steps) {
     if (!isRecord(step)) continue;
     if (step.type === "google_search_call") {
@@ -348,12 +362,27 @@ function parseGemini(
         if (!isRecord(annotation)) continue;
         const url = recordUrl(annotation);
         if (!url) continue;
-        citations.push({
+        const citedText = sliceText(content.text, annotation.start_index, annotation.end_index);
+        const title = stringValue(annotation.title);
+        pushCitation({
           url,
-          title: stringValue(annotation.title),
-          citedText: sliceText(content.text, annotation.start_index, annotation.end_index),
-          targetMatch: targetMatches(request, url),
+          title,
+          citedText,
+          targetMatch: targetMatchesCitation(request, url, targetMatches, citedText || title)
+            ? "YES"
+            : "NO",
         });
+      }
+    }
+  }
+  const responseText = textParts.join("\n") || stringValue(payload.output_text);
+  if (responseText) {
+    for (const citation of parseHtmlLinkCitations(responseText, request, targetMatches)) {
+      pushCitation(citation);
+    }
+    if (!citations.length) {
+      for (const citation of parseMarkdownLinkCitations(responseText, request, targetMatches)) {
+        pushCitation(citation);
       }
     }
   }
@@ -369,7 +398,7 @@ function parseGemini(
     generatedQueries,
     sources: [],
     citations,
-    responseText: textParts.join("\n") || stringValue(payload.output_text),
+    responseText,
     metadata: { interactionId: payload.id, actualModel: payload.model, usage: payload.usage },
     ...(request.debug ? { rawResponse: raw } : {}),
   };

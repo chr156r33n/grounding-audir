@@ -264,6 +264,37 @@ button:disabled { opacity: 0.55; cursor: wait; }
   background: none;
   font: 700 10px var(--mono);
   text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.candidate button.is-selected {
+  color: var(--navy);
+  background: var(--blue-light);
+  padding: 4px 8px;
+}
+.field-help {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.query-batch {
+  display: grid;
+  gap: 10px;
+}
+.query-batch-label {
+  margin: 0;
+  font: 700 11px var(--mono);
+  color: var(--navy-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.summary-grid-inner {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 9px;
+  contain: layout paint;
 }
 
 .results {
@@ -281,9 +312,8 @@ button:disabled { opacity: 0.55; cursor: wait; }
 }
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 9px;
-  contain: layout paint;
+  gap: 24px;
+  contain: layout style;
 }
 .summary-card {
   padding: 18px;

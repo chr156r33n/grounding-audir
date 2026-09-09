@@ -1,3 +1,4 @@
+import json
 import socket
 
 import pytest
@@ -16,7 +17,11 @@ from core.query_discovery import (
     build_term_seeded_queries,
     discover_queries,
     extract_key_terms,
+    html_to_plain_text,
+    is_useful_query,
     merge_candidates,
+    merge_distinctive_terms,
+    parse_discovery_response,
     parse_query_candidates,
     query_uses_page_terms,
     select_useful_chunks,
@@ -63,7 +68,7 @@ def test_dom_parser_selects_high_signal_chunks():
     assert all("secretNavigationNoise" not in chunk.text for chunk in chunks)
 
 
-def test_prompt_uses_selected_dom_evidence():
+def test_prompt_uses_page_copy_for_llm():
     parser = _EvidenceParser()
     parser.feed(HTML)
     evidence = PageEvidence(
@@ -73,16 +78,17 @@ def test_prompt_uses_selected_dom_evidence():
         description=parser.description,
         language=parser.language,
         chunks=select_useful_chunks(parser),
+        page_copy=html_to_plain_text(HTML),
+        input_source="paste",
     )
-    evidence.key_terms = extract_key_terms(evidence)
 
     prompt = build_query_prompt(evidence, 6)
     assert "Generate exactly 6 distinct queries" in prompt
     assert "Harbour Hotel in Central Hong Kong" in prompt
-    assert "<KEY_TERMS>" in prompt
-    assert "harbour hotel" in prompt.lower()
-    assert "Every query you return MUST incorporate at least one KEY_TERM" in prompt
-    assert "Do not include the URL itself as the query" in prompt
+    assert "<PAGE_COPY>" in prompt
+    assert "PASTED visible page copy" in prompt
+    assert "postal codes, street addresses, phone numbers" in prompt
+    assert "Do not include the URL, a full address, or a phone number" in prompt
 
 
 def test_extract_key_terms_from_page_evidence():
@@ -124,6 +130,52 @@ def test_merge_candidates_prefers_term_seeded_seed():
     assert merged[0].generators == ("page_terms", "openai")
     assert merged[1].query == "Family suites Central"
     assert merged[2].query == "Rooftop pool hotels Hong Kong"
+
+
+def test_parse_discovery_response_rejects_address_lookup_queries():
+    queries, terms = parse_discovery_response(
+        json.dumps(
+            {
+                "distinctive_terms": ["Four Seasons Tokyo Otemachi"],
+                "queries": [
+                    {
+                        "query": "Four Seasons Hotel Tokyo at Otemachi 1-2-1 Otemachi phone number",
+                    },
+                    {
+                        "query": "Four Seasons Tokyo Michelin restaurant est hotel",
+                    },
+                ],
+            }
+        ),
+        "gemini",
+    )
+    assert len(queries) == 1
+    assert "Michelin" in queries[0].query
+    assert terms == ["Four Seasons Tokyo Otemachi"]
+
+
+def test_merge_distinctive_terms_deduplicates_generators():
+    terms = merge_distinctive_terms(
+        [
+            GeneratorResult(
+                "openai",
+                "OpenAI",
+                "gpt-test",
+                "complete",
+                10,
+                distinctive_terms=["Harbour Hotel", "Central Hong Kong"],
+            ),
+            GeneratorResult(
+                "gemini",
+                "Gemini",
+                "gemini-test",
+                "complete",
+                12,
+                distinctive_terms=["harbour hotel", "Rooftop pool"],
+            ),
+        ]
+    )
+    assert terms == ["Harbour Hotel", "Central Hong Kong", "Rooftop pool"]
 
 
 def test_query_parser_accepts_fenced_json():
@@ -269,5 +321,4 @@ def test_discover_queries_uses_paste_without_fetch(monkeypatch):
     )
     assert result.evidence is not None
     assert result.evidence.input_source == "paste"
-    assert result.evidence.key_terms
     assert result.candidates

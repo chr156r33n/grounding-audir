@@ -149,15 +149,15 @@ def _configuration_form():
             ),
         )
         discovery_paste = st.text_area(
-            "Or paste page HTML / visible copy (skips fetch)",
+            "Or paste visible page copy (skips fetch)",
             placeholder=(
-                "Paste saved HTML or the visible page text here when the live fetch is blocked "
-                "by a WAF, login wall, or JavaScript rendering."
+                "Paste what you see on the page — titles, headings, promos, and body copy. "
+                "The LLM interprets unstructured paste and ignores addresses, phones, and nav boilerplate."
             ),
             height=160,
             help=(
-                "If this field is filled, the app will not download the URL. Paste either raw "
-                "HTML (best) or several paragraphs of visible page copy."
+                "If this field is filled, the app will not download the URL. Paste visible page "
+                "copy as you would copy it from the browser; raw HTML also works."
             ),
         )
         discovery_fetch_profile = st.selectbox(
@@ -423,7 +423,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
         )
         if evidence.key_terms:
-            st.caption(f"Extracted page terms: {', '.join(evidence.key_terms)}")
+            st.caption(f"Distinctive terms: {', '.join(evidence.key_terms)}")
     if discovery.candidates:
         st.dataframe(
             [

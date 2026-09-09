@@ -59,7 +59,7 @@ export function parseHtmlLinkCitations(
       url,
       title: anchorText || undefined,
       citedText: anchorText || undefined,
-      targetMatch: targetMatchesCitation(request, url, targetMatches, anchorText) ? "YES" : "NO",
+      targetMatch: targetMatchesCitation(request, url, targetMatches, anchorText),
     });
   }
   return citations;
@@ -81,7 +81,7 @@ export function parseMarkdownLinkCitations(
       url,
       title: anchorText || undefined,
       citedText: anchorText || undefined,
-      targetMatch: targetMatchesCitation(request, url, targetMatches, anchorText) ? "YES" : "NO",
+      targetMatch: targetMatchesCitation(request, url, targetMatches, anchorText),
     });
   }
   return citations;

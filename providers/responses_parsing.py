@@ -30,6 +30,10 @@ RESPONSES_INCLUDE_FIELDS = (
     "web_search_call.results",
 )
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_HTML_LINK = re.compile(
+    r'<a\b[^>]*\bhref=["\'](https?://[^"\']+)["\'][^>]*>(.*?)</a>',
+    re.I | re.S,
+)
 _WS_CALL_ID_SUFFIX = re.compile(r"(?:^|[,\s;]+)ws_call_id=[^\s,;]+", re.I)
 
 
@@ -235,6 +239,34 @@ def parse_markdown_link_citations(
                 end_index=match.end(),
                 cited_text=anchor_text or None,
                 metadata={"citation_origin": "markdown_link"},
+            )
+        )
+    return citations
+
+
+def parse_html_link_citations(
+    provider: GroundingProvider,
+    request: GroundingRequest,
+    text: str,
+) -> list[Citation]:
+    citations: list[Citation] = []
+    seen: set[str] = set()
+    for match in _HTML_LINK.finditer(text):
+        url = match.group(1).strip()
+        anchor_text = re.sub(r"<[^>]+>", "", match.group(2))
+        anchor_text = re.sub(r"\s+", " ", anchor_text).strip()
+        if url in seen:
+            continue
+        seen.add(url)
+        citations.append(
+            provider.build_citation(
+                request,
+                url,
+                title=anchor_text or None,
+                start_index=match.start(),
+                end_index=match.end(),
+                cited_text=anchor_text or None,
+                metadata={"citation_origin": "html_link"},
             )
         )
     return citations

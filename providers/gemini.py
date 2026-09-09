@@ -16,7 +16,7 @@ from core.debug import (
 )
 from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
 from .model_catalog import GEMINI_GOOGLE_SEARCH, model_field
-from .responses_parsing import extract_query_text
+from .responses_parsing import extract_query_text, parse_html_link_citations, parse_markdown_link_citations
 
 
 class GeminiProvider(GroundingProvider):
@@ -147,6 +147,19 @@ class GeminiProvider(GroundingProvider):
         run.response_text = "\n".join(part for part in text_parts if part) or getattr(
             raw_response, "output_text", None
         )
+        seen_urls = {citation.url for citation in run.citations}
+        if run.response_text:
+            for citation in parse_html_link_citations(self, request, run.response_text):
+                if citation.url in seen_urls:
+                    continue
+                seen_urls.add(citation.url)
+                run.citations.append(citation)
+            if not run.citations:
+                for citation in parse_markdown_link_citations(self, request, run.response_text):
+                    if citation.url in seen_urls:
+                        continue
+                    seen_urls.add(citation.url)
+                    run.citations.append(citation)
         run.search_performed = (
             ObservationState.YES
             if search_calls

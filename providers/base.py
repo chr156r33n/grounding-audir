@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from core.diagnostics import attach_observation_diagnostics
 from core.enums import ObservationState, ProviderType, RunStatus
-from core.matching import matching_targets, normalize_url, registrable_domain
+from core.matching import matching_targets, matching_targets_for_citation, normalize_url, registrable_domain
 from core.models import (
     Citation,
     GroundingRequest,
@@ -138,7 +138,12 @@ class GroundingProvider(ABC):
             start_index=start_index,
             end_index=end_index,
             cited_text=cited_text,
-            target_matches=matching_targets(request.targets, url),
+            target_matches=matching_targets_for_citation(
+                request.targets,
+                url,
+                title=title,
+                cited_text=cited_text,
+            ),
             metadata=metadata or {},
         )
 

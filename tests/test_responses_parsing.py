@@ -175,3 +175,17 @@ def test_parse_markdown_link_citations_deduplicates(request):
     )
     citations = parse_markdown_link_citations(OpenAIWebProvider(), request, text)
     assert len(citations) == 1
+
+
+def test_parse_html_link_citations_reads_grounding_redirect_links(request):
+    from providers.responses_parsing import parse_html_link_citations
+
+    text = (
+        'See <a href="https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc" '
+        'target="_blank" rel="noopener">fourseasons.com</a> for details.'
+    )
+    citations = parse_html_link_citations(OpenAIWebProvider(), request, text)
+    assert len(citations) == 1
+    assert citations[0].metadata["citation_origin"] == "html_link"
+    assert citations[0].cited_text == "fourseasons.com"
+    assert citations[0].target_matches == ["fourseasons.com"]

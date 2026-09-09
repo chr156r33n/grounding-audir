@@ -38,6 +38,35 @@ def test_gemini_citations_do_not_become_retrieval(request):
     assert run.metadata["search_suggestions"]
 
 
+def test_gemini_html_anchor_citations_use_redirect_and_anchor_text(request):
+    fixture = {
+        **FIXTURES["gemini"],
+        "steps": [
+            FIXTURES["gemini"]["steps"][0],
+            {
+                "type": "model_output",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            'Stay at <a href="https://vertexaisearch.cloud.google.com/'
+                            'grounding-api-redirect/example" target="_blank" rel="noopener">'
+                            "fourseasons.com</a>."
+                        ),
+                        "annotations": [],
+                    }
+                ],
+            },
+        ],
+    }
+    run = GeminiProvider().parse_response(fixture, request)
+    assert len(run.citations) == 1
+    assert "grounding-api-redirect" in run.citations[0].url
+    assert run.citations[0].cited_text == "fourseasons.com"
+    assert run.citations[0].metadata["citation_origin"] == "html_link"
+    assert run.target_cited is ObservationState.YES
+
+
 def test_openai_distinguishes_sources_and_citations(request):
     run = OpenAIWebProvider().parse_response(FIXTURES["openai"], request)
     assert run.target_retrieved is ObservationState.YES

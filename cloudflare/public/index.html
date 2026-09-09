@@ -91,7 +91,7 @@
         <aside class="panel discovery-panel">
           <div class="panel-heading">
             <span class="step">02</span>
-            <div><h2>Discover queries</h2><p>Extract vocabulary from a page first.</p></div>
+            <div><h2>Discover queries</h2><p>Uses OpenAI or Gemini Worker secrets to suggest grounded search phrases.</p></div>
           </div>
           <label>
             <span>Public page URL <small>optional</small></span>
@@ -102,7 +102,7 @@
             <span>HTML or visible text</span>
             <textarea id="discovery-content" rows="8" placeholder="Paste a page title, headings, and body copy…"></textarea>
           </label>
-          <button id="discover-button" class="secondary" type="button">Extract terms &amp; queries</button>
+          <button id="discover-button" class="secondary" type="button">Discover queries</button>
           <p id="discovery-error" class="error" role="alert"></p>
           <div id="discovery-results" hidden>
             <p class="micro-label">Extracted vocabulary</p>

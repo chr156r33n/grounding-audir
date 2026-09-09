@@ -96,7 +96,9 @@ Useful endpoints:
 
 - `GET /api/health`
 - `GET /api/config`
-- `POST /api/discover`
+- `POST /api/discover` — fetches or parses page evidence, then calls OpenAI and/or
+  Gemini (whichever secrets are configured) to generate grounded query suggestions.
+  Requires at least one of `OPENAI_API_KEY` or `GEMINI_API_KEY`.
 - `POST /api/run`
 
 ## Cloudflare Git integration alternative

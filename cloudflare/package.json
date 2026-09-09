@@ -8,7 +8,7 @@
     "preview:local": "node --experimental-strip-types test/dev-server.mjs",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",

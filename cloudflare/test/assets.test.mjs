@@ -6,6 +6,7 @@ test("edge UI exposes run and discovery controls", async () => {
   const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
   assert.match(html, /id="run-form"/);
   assert.match(html, /id="discover-button"/);
+  assert.match(html, /Discover queries/);
   assert.match(html, /id="results"/);
   assert.match(html, /Torque Partnership/);
   assert.match(html, /Turning Digital/);

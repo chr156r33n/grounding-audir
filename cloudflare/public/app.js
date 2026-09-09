@@ -1,5 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 let lastResult = null;
+let lastRuns = [];
 
 async function api(path, options) {
   const response = await fetch(path, {
@@ -122,6 +123,7 @@ $("#download-button").addEventListener("click", () => {
 
 function renderResults(result) {
   const results = $("#results");
+  lastRuns = result.runs;
   $("#summary-grid").innerHTML = result.runs
     .map(
       (run) => `
@@ -132,41 +134,64 @@ function renderResults(result) {
         </article>`,
     )
     .join("");
-  $("#run-details").innerHTML = result.runs.map((run, index) => renderRun(run, index)).join("");
-  bindLazyRawResponses(result.runs);
+  $("#run-details").innerHTML = result.runs.map((run, index) => renderRunShell(run, index)).join("");
+  bindLazyRunPanels();
   results.hidden = false;
   results.scrollIntoView({ block: "start" });
 }
 
-function bindLazyRawResponses(runs) {
-  document.querySelectorAll(".raw-block").forEach((block) => {
-    block.addEventListener("toggle", () => {
-      if (!block.open) return;
-      const pre = block.querySelector(".raw-pre");
-      if (!pre || pre.dataset.loaded === "true") return;
-      const index = Number(pre.dataset.runIndex);
-      const run = runs[index];
-      if (!run?.rawResponse) return;
-      pre.textContent = JSON.stringify(run.rawResponse, null, 2);
-      pre.dataset.loaded = "true";
-    });
+function bindLazyRunPanels() {
+  document.querySelectorAll(".run-panel").forEach((panel) => {
+    panel.addEventListener("toggle", onRunPanelToggle);
   });
+}
+
+function onRunPanelToggle(event) {
+  const panel = event.currentTarget;
+  if (!panel.open || panel.dataset.rendered === "true") return;
+  const index = Number(panel.dataset.runIndex);
+  const run = lastRuns[index];
+  if (!run) return;
+  panel.insertAdjacentHTML("beforeend", `<div class="detail-body">${renderRunBody(run, index)}</div>`);
+  panel.dataset.rendered = "true";
+  panel.querySelectorAll(".raw-block").forEach((block) => bindRawBlock(block, run));
+}
+
+function bindRawBlock(block, run) {
+  block.addEventListener("toggle", () => {
+    if (!block.open) return;
+    const pre = block.querySelector(".raw-pre");
+    if (!pre || pre.dataset.loaded === "true") return;
+    if (!run?.rawResponse) return;
+    pre.textContent = JSON.stringify(run.rawResponse, null, 2);
+    pre.dataset.loaded = "true";
+  });
+}
+
+function renderRunShell(run, index) {
+  return `
+    <details class="run-panel" data-run-index="${index}">
+      <summary>
+        <span>${escapeHtml(run.providerName)}</span>
+        <span>${run.status === "failed" ? "FAILED" : `retrieved ${run.targetRetrieved} · cited ${run.targetCited}`}</span>
+      </summary>
+    </details>`;
 }
 
 function renderSourceSection(title, caption, sources, emptyMessage) {
   if (!sources.length) {
     return `<div><h4>${title}</h4><p class="muted">${emptyMessage}</p></div>`;
   }
-  return `<div><h4>${title}</h4><p class="muted">${caption}</p><div class="link-list">${sources
+  return `<div><h4>${title}</h4><p class="muted">${caption}</p><ul class="link-list">${sources
     .map(
       (source) =>
-        `<a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener">${escapeHtml(
+        `<li><a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener">${escapeHtml(
           source.title || source.url,
         )}${source.callStatus ? ` · ${escapeHtml(source.callStatus)}` : ""}${
           source.targetMatch ? " · TARGET" : ""
-        }</a>`,
+        }</a></li>`,
     )
-    .join("")}</div></div>`;
+    .join("")}</ul></div>`;
 }
 
 function formatGeneratedQueryItem(item) {
@@ -180,23 +205,23 @@ function formatGeneratedQueryItem(item) {
   return "";
 }
 
-function renderRun(run, index) {
+function renderRunBody(run, index) {
   const openedPages = (run.sources || []).filter((source) => source.sourceOrigin === "open_page");
   const listedSources = (run.sources || []).filter(
     (source) => source.sourceOrigin !== "open_page",
   );
   const citations = run.citations?.length
-    ? `<div><h4>Citations</h4><p class="muted">Inline URL citations exposed in the final answer.</p><div class="link-list">${run.citations
+    ? `<div><h4>Citations</h4><p class="muted">Inline URL citations exposed in the final answer.</p><ul class="link-list">${run.citations
         .map(
           (citation) =>
-            `<a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
+            `<li><a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
               citation.title || citation.url,
-            )}${citation.targetMatch ? " · TARGET" : ""}</a>`,
+            )}${citation.targetMatch ? " · TARGET" : ""}</a></li>`,
         )
-        .join("")}</div></div>`
+        .join("")}</ul></div>`
     : `<div><h4>Citations</h4><p class="muted">No inline URL citations were exposed. Check Opened pages if the provider opened target URLs during search.</p></div>`;
   const queries = run.generatedQueries?.length
-    ? `<div><h4>Generated queries</h4><p class="muted">Search-tool queries with internal ws_call_id suffixes removed when present.</p><div class="link-list">${run.generatedQueries
+    ? `<div><h4>Generated queries</h4><p class="muted">Search-tool queries with internal ws_call_id suffixes removed when present.</p><ul class="link-list">${run.generatedQueries
         .map((item) => {
           const query = formatGeneratedQueryItem(item);
           if (!query) return "";
@@ -204,44 +229,36 @@ function renderRun(run, index) {
             item && typeof item === "object" && typeof item.actionType === "string"
               ? item.actionType
               : "";
-          return `<span>${escapeHtml(query)}${
+          return `<li><span>${escapeHtml(query)}${
             actionType ? ` · ${escapeHtml(actionType)}` : ""
-          }</span>`;
+          }</span></li>`;
         })
         .filter(Boolean)
-        .join("")}</div></div>`
+        .join("")}</ul></div>`
     : "";
   const raw = run.rawResponse
-    ? `<details class="raw-block"><summary>Show sanitised raw response</summary><pre class="raw-pre" data-run-index="${index}">Open to load response JSON…</pre></details>`
+    ? `<details class="raw-block"><summary>Show sanitised raw response</summary><pre class="raw-pre">Open to load response JSON…</pre></details>`
     : "";
   return `
-    <details>
-      <summary>
-        <span>${escapeHtml(run.providerName)}</span>
-        <span>${run.status === "failed" ? "FAILED" : `retrieved ${run.targetRetrieved} · cited ${run.targetCited}`}</span>
-      </summary>
-      <div class="detail-body">
-        ${run.error ? `<p class="error">${escapeHtml(run.error)}</p>` : ""}
-        ${queries}
-        ${renderSourceSection(
-          "Opened pages",
-          "Pages the search tool opened during the run. These are retrieval evidence, not inline citations.",
-          openedPages,
-          "No open_page URLs were exposed.",
-        )}
-        ${renderSourceSection(
-          "Consulted source URLs",
-          "URLs from explicit consulted-source lists when the provider exposes them.",
-          listedSources,
-          openedPages.length
-            ? "No explicit consulted-source list was returned."
-            : "No consulted-source URLs were exposed.",
-        )}
-        ${citations}
-        ${run.responseText ? `<div><h4>Grounded response</h4><p>${escapeHtml(run.responseText)}</p></div>` : ""}
-        ${raw}
-      </div>
-    </details>`;
+    ${run.error ? `<p class="error">${escapeHtml(run.error)}</p>` : ""}
+    ${queries}
+    ${renderSourceSection(
+      "Opened pages",
+      "Pages the search tool opened during the run. These are retrieval evidence, not inline citations.",
+      openedPages,
+      "No open_page URLs were exposed.",
+    )}
+    ${renderSourceSection(
+      "Consulted source URLs",
+      "URLs from explicit consulted-source lists when the provider exposes them.",
+      listedSources,
+      openedPages.length
+        ? "No explicit consulted-source list was returned."
+        : "No consulted-source URLs were exposed.",
+    )}
+    ${citations}
+    ${run.responseText ? `<div><h4>Grounded response</h4><p class="response-text">${escapeHtml(run.responseText)}</p></div>` : ""}
+    ${raw}`;
 }
 
 function escapeHtml(value) {

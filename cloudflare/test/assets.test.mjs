@@ -13,9 +13,17 @@ test("edge UI exposes run and discovery controls", async () => {
 
 test("client avoids eager raw response rendering", async () => {
   const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
-  assert.match(script, /bindLazyRawResponses/);
-  assert.match(script, /JSON\.stringify\(run\.rawResponse/);
-  assert.doesNotMatch(script, /JSON\.stringify\(run\.rawResponse, null, 2\)\}\)<\/pre>/);
+  assert.match(script, /bindLazyRunPanels/);
+  assert.match(script, /renderRunShell/);
+  assert.match(script, /insertAdjacentHTML\("beforeend", `<div class="detail-body">\$\{renderRunBody/);
+  assert.doesNotMatch(script, /function renderRunShell[\s\S]*?detail-body/);
+});
+
+test("styles use Torque blue palette not orange accents", async () => {
+  const css = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(css, /--blue:/);
+  assert.match(css, /--navy:/);
+  assert.doesNotMatch(css, /#e8622a|orange/i);
 });
 
 test("client calls only same-origin API routes", async () => {

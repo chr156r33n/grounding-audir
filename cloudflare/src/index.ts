@@ -22,7 +22,7 @@ export default {
         authRequired: !!env.OBSERVATORY_ACCESS_KEY,
         capabilities: {
           queryDiscovery: true,
-          microsoftBingGrounding: false,
+          queryDiscoveryLlm: !!(env.OPENAI_API_KEY || env.GEMINI_API_KEY),
         },
         note:
           "Microsoft Bing Grounding remains available in Streamlit; the Worker supports Foundry Web Search and Web IQ.",

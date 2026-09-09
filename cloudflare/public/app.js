@@ -74,7 +74,7 @@ $("#discover-button").addEventListener("click", async () => {
   const error = $("#discovery-error");
   error.textContent = "";
   button.disabled = true;
-  button.textContent = "Extracting…";
+  button.textContent = "Discovering…";
   try {
     const result = await api("/api/discover", {
       method: "POST",
@@ -91,11 +91,28 @@ $("#discover-button").addEventListener("click", async () => {
       .map(
         (candidate) => `
           <div class="candidate">
-            <span>${escapeHtml(candidate.query)}</span>
+            <div class="candidate-copy">
+              <span>${escapeHtml(candidate.query)}</span>
+              ${
+                candidate.rationale
+                  ? `<small class="muted">${escapeHtml(candidate.rationale)}</small>`
+                  : ""
+              }
+              ${
+                candidate.generator
+                  ? `<small class="muted">${escapeHtml(candidate.generator)}</small>`
+                  : ""
+              }
+            </div>
             <button type="button" data-query="${encodeURIComponent(candidate.query)}">Use</button>
           </div>`,
       )
       .join("");
+    if (result.error && result.candidates?.length) {
+      $("#discovery-error").textContent = result.error;
+    } else if (result.error) {
+      throw new Error(result.error);
+    }
     $("#discovery-results").hidden = false;
     document.querySelectorAll(".candidate button").forEach((item) => {
       item.addEventListener("click", () => {
@@ -107,7 +124,7 @@ $("#discover-button").addEventListener("click", async () => {
     error.textContent = caught.message;
   } finally {
     button.disabled = false;
-    button.textContent = "Extract terms & queries";
+    button.textContent = "Discover queries";
   }
 });
 

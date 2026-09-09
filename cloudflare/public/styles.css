@@ -250,6 +250,14 @@ button:disabled { opacity: 0.55; cursor: wait; }
   border: 1px solid var(--line);
   font-size: 12px;
 }
+.candidate-copy {
+  display: grid;
+  gap: 4px;
+}
+.candidate-copy small {
+  display: block;
+  line-height: 1.35;
+}
 .candidate button {
   border: 0;
   color: var(--blue);

@@ -30,7 +30,7 @@ test("parseHtmlLinkCitations reads Gemini grounding redirect anchors", () => {
   assert.equal(citations.length, 1);
   assert.match(citations[0].url, /grounding-api-redirect/);
   assert.equal(citations[0].citedText, "fourseasons.com");
-  assert.equal(citations[0].targetMatch, "YES");
+  assert.equal(citations[0].targetMatch, true);
 });
 
 test("isGroundingRedirectUrl detects vertex redirect links", () => {

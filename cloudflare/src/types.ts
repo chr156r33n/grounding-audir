@@ -31,6 +31,7 @@ export interface RunRequest {
   query: string;
   target: string;
   matchMode: "root_domain" | "exact_hostname" | "url_prefix";
+  brandRegex?: string;
   market?: string;
   language?: string;
   providers: ProviderId[];
@@ -71,6 +72,8 @@ export interface ProviderRun {
   searchPerformed: ObservationState;
   targetRetrieved: ObservationState;
   targetCited: ObservationState;
+  brandMentioned?: ObservationState;
+  brandMatches?: string[];
   generatedQueries: GeneratedQuery[];
   sources: Source[];
   citations: Citation[];

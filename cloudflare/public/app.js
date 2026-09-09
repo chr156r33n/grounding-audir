@@ -104,6 +104,7 @@ $("#run-form").addEventListener("submit", async (event) => {
     );
     const shared = {
       target: $("#target").value,
+      brandRegex: $("#brand-regex").value,
       matchMode: $("#match-mode").value,
       market: $("#market").value,
       language: $("#language").value,
@@ -220,7 +221,7 @@ function renderResults(result) {
                     <article class="summary-card">
                       <h3>${escapeHtml(run.providerName)}</h3>
                       <div class="state ${run.targetCited}">${run.targetCited}</div>
-                      <small>target cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
+                      <small>target cited · brand ${run.brandMentioned || "N/A"} · ${(run.latencyMs / 1000).toFixed(1)}s</small>
                     </article>`,
                 )
                 .join("")}
@@ -254,7 +255,7 @@ function renderResults(result) {
               <article class="summary-card">
                 <h3>${escapeHtml(run.providerName)}</h3>
                 <div class="state ${run.targetCited}">${run.targetCited}</div>
-                <small>target cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
+                <small>target cited · brand ${run.brandMentioned || "N/A"} · ${(run.latencyMs / 1000).toFixed(1)}s</small>
               </article>`,
           )
           .join("")}
@@ -295,11 +296,14 @@ function bindRawBlock(block, run) {
 }
 
 function renderRunShell(run, index) {
+  const brand = run.brandMentioned && run.brandMentioned !== "N/A"
+    ? ` · brand ${run.brandMentioned}`
+    : "";
   return `
     <details class="run-panel" data-run-index="${index}">
       <summary>
         <span>${escapeHtml(run.providerName)}</span>
-        <span>${run.status === "failed" ? "FAILED" : `retrieved ${run.targetRetrieved} · cited ${run.targetCited}`}</span>
+        <span>${run.status === "failed" ? "FAILED" : `retrieved ${run.targetRetrieved} · cited ${run.targetCited}${brand}`}</span>
       </summary>
     </details>`;
 }
@@ -365,8 +369,16 @@ function renderRunBody(run, index) {
   const raw = run.rawResponse
     ? `<details class="raw-block"><summary>Show sanitised raw response</summary><pre class="raw-pre">Open to load response JSON…</pre></details>`
     : "";
+  const brandMatch = run.brandMentioned && run.brandMentioned !== "N/A"
+    ? `<div><h4>Brand mentioned</h4><p class="muted">${escapeHtml(run.brandMentioned)}${
+        run.brandMatches?.length
+          ? ` · matched ${run.brandMatches.map((item) => `"${escapeHtml(item)}"`).join(", ")}`
+          : ""
+      }</p></div>`
+    : "";
   return `
     ${run.error ? `<p class="error">${escapeHtml(run.error)}</p>` : ""}
+    ${brandMatch}
     ${queries}
     ${renderSourceSection(
       "Opened pages",

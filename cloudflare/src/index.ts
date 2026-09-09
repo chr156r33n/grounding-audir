@@ -1,4 +1,5 @@
 import { discoverQueries, type DiscoveryRequest } from "./discovery.ts";
+import { compileBrandRegex, matchBrand } from "./brand-match.ts";
 import { configuredProviders, runProvider } from "./providers.ts";
 import type { Env, ProviderId, RunRequest } from "./types.ts";
 
@@ -50,9 +51,17 @@ export default {
           );
         }
         const startedAt = new Date().toISOString();
-        const runs = await Promise.all(
+        const providerRuns = await Promise.all(
           runRequest.providers.map((id) => runProvider(id, runRequest, env)),
         );
+        const runs = providerRuns.map((run) => {
+          const brandMatch = matchBrand(run.responseText, runRequest.brandRegex);
+          return {
+            ...run,
+            brandMentioned: brandMatch.state,
+            brandMatches: brandMatch.matches,
+          };
+        });
         return json({
           runId: crypto.randomUUID(),
           startedAt,
@@ -84,6 +93,8 @@ function validateRun(body: Partial<RunRequest>): RunRequest {
   const target = String(body.target || "").trim();
   if (!query) throw new Error("Query is required.");
   if (!target) throw new Error("Target domain or URL is required.");
+  const brandRegex = String(body.brandRegex || "").trim();
+  compileBrandRegex(brandRegex);
   try {
     new URL(target.includes("://") ? target : `https://${target}`);
   } catch {
@@ -102,6 +113,7 @@ function validateRun(body: Partial<RunRequest>): RunRequest {
     query: query.slice(0, 1_000),
     target: target.slice(0, 2_000),
     matchMode,
+    brandRegex: brandRegex || undefined,
     market: String(body.market || "").trim().slice(0, 20) || undefined,
     language: String(body.language || "").trim().slice(0, 20) || undefined,
     providers,

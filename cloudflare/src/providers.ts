@@ -270,9 +270,7 @@ function parseResponses(
               targetMatches,
               sliceText(text, annotation.start_index, annotation.end_index) ||
                 stringValue(annotation.title || annotation.name),
-            )
-              ? "YES"
-              : "NO",
+            ),
           });
         }
       }
@@ -368,9 +366,7 @@ function parseGemini(
           url,
           title,
           citedText,
-          targetMatch: targetMatchesCitation(request, url, targetMatches, citedText || title)
-            ? "YES"
-            : "NO",
+          targetMatch: targetMatchesCitation(request, url, targetMatches, citedText || title),
         });
       }
     }

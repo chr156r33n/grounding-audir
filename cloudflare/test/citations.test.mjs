@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  appendOrMergeCitation,
   isGroundingRedirectUrl,
   parseHtmlLinkCitations,
   targetMatchesCitation,
@@ -43,4 +44,23 @@ test("isGroundingRedirectUrl detects vertex redirect links", () => {
 test("targetMatchesCitation uses anchor text when redirect URL does not match", () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
   assert.equal(targetMatchesCitation(request, redirect, targetMatches, "fourseasons.com"), true);
+});
+
+test("later HTML citation promotes a duplicate structured redirect to target match", () => {
+  const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+  const citations = [
+    {
+      url: redirect,
+      targetMatch: false,
+    },
+  ];
+  appendOrMergeCitation(citations, {
+    url: redirect,
+    title: "example.com",
+    citedText: "example.com",
+    targetMatch: true,
+  });
+  assert.equal(citations.length, 1);
+  assert.equal(citations[0].targetMatch, true);
+  assert.equal(citations[0].citedText, "example.com");
 });

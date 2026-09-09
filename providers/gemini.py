@@ -118,6 +118,9 @@ class GeminiProvider(GroundingProvider):
                     markup = result.get("search_suggestions")
                     if markup:
                         suggestions.append(markup)
+                        for citation in parse_html_link_citations(self, request, markup):
+                            citation.metadata["gemini_container"] = "search_suggestions"
+                            _append_or_merge_citation(run.citations, citation)
             elif step_type == "model_output":
                 for content_index, content in enumerate(step.get("content") or []):
                     if content.get("type") != "text":
@@ -147,19 +150,12 @@ class GeminiProvider(GroundingProvider):
         run.response_text = "\n".join(part for part in text_parts if part) or getattr(
             raw_response, "output_text", None
         )
-        seen_urls = {citation.url for citation in run.citations}
         if run.response_text:
             for citation in parse_html_link_citations(self, request, run.response_text):
-                if citation.url in seen_urls:
-                    continue
-                seen_urls.add(citation.url)
-                run.citations.append(citation)
+                _append_or_merge_citation(run.citations, citation)
             if not run.citations:
                 for citation in parse_markdown_link_citations(self, request, run.response_text):
-                    if citation.url in seen_urls:
-                        continue
-                    seen_urls.add(citation.url)
-                    run.citations.append(citation)
+                    _append_or_merge_citation(run.citations, citation)
         run.search_performed = (
             ObservationState.YES
             if search_calls
@@ -185,6 +181,21 @@ class GeminiProvider(GroundingProvider):
             ),
         }
         return self.finish_states(run, retrieval_complete=False)
+
+
+def _append_or_merge_citation(citations: list[Any], incoming: Any) -> None:
+    existing = next((item for item in citations if item.url == incoming.url), None)
+    if existing is None:
+        citations.append(incoming)
+        return
+    existing.title = existing.title or incoming.title
+    existing.cited_text = existing.cited_text or incoming.cited_text
+    existing.target_matches = list(
+        dict.fromkeys([*existing.target_matches, *incoming.target_matches])
+    )
+    if incoming.metadata.get("citation_origin") == "html_link":
+        existing.metadata.setdefault("citation_origin", "html_link")
+        existing.metadata["html_link_observed"] = True
 
 
 def _utf8_slice(text: str, start: Any, end: Any) -> str | None:

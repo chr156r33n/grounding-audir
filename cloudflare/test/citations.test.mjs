@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  appendOrMergeCitation,
   isGroundingRedirectUrl,
   parseHtmlLinkCitations,
   targetMatchesCitation,
@@ -8,7 +10,7 @@ import {
 
 const request = {
   query: "luxury hotel tokyo",
-  target: "fourseasons.com",
+  target: "example.com",
   matchMode: "root_domain",
   providers: ["gemini"],
 };
@@ -16,8 +18,8 @@ const request = {
 function targetMatches(_request, candidate) {
   try {
     const candidateUrl = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    const targetUrl = new URL("https://fourseasons.com");
-    return candidateUrl.hostname.endsWith("fourseasons.com");
+    const targetUrl = new URL("https://example.com");
+    return candidateUrl.hostname.endsWith(targetUrl.hostname);
   } catch {
     return false;
   }
@@ -25,11 +27,11 @@ function targetMatches(_request, candidate) {
 
 test("parseHtmlLinkCitations reads Gemini grounding redirect anchors", () => {
   const text =
-    '<a href="https://vertexaisearch.cloud.google.com/grounding-api-redirect/example" target="_blank" rel="noopener">fourseasons.com</a>';
+    '<a href="https://vertexaisearch.cloud.google.com/grounding-api-redirect/example" target="_blank" rel="noopener">example.com</a>';
   const citations = parseHtmlLinkCitations(text, request, targetMatches);
   assert.equal(citations.length, 1);
   assert.match(citations[0].url, /grounding-api-redirect/);
-  assert.equal(citations[0].citedText, "fourseasons.com");
+  assert.equal(citations[0].citedText, "example.com");
   assert.equal(citations[0].targetMatch, true);
 });
 
@@ -42,5 +44,32 @@ test("isGroundingRedirectUrl detects vertex redirect links", () => {
 
 test("targetMatchesCitation uses anchor text when redirect URL does not match", () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
-  assert.equal(targetMatchesCitation(request, redirect, targetMatches, "fourseasons.com"), true);
+  assert.equal(targetMatchesCitation(request, redirect, targetMatches, "example.com"), true);
+});
+
+test("later HTML citation promotes a duplicate structured redirect to target match", () => {
+  const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+  const citations = [
+    {
+      url: redirect,
+      targetMatch: false,
+    },
+  ];
+  appendOrMergeCitation(citations, {
+    url: redirect,
+    title: "example.com",
+    citedText: "example.com",
+    targetMatch: true,
+  });
+  assert.equal(citations.length, 1);
+  assert.equal(citations[0].targetMatch, true);
+  assert.equal(citations[0].citedText, "example.com");
+});
+
+test("Gemini parser scans google_search_result suggestion markup", async () => {
+  const source = await readFile(new URL("../src/providers.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /step\.type === "google_search_result"[\s\S]*?result\.search_suggestions[\s\S]*?parseHtmlLinkCitations/,
+  );
 });

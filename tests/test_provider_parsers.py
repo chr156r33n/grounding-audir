@@ -53,7 +53,15 @@ def test_gemini_html_anchor_citations_use_redirect_and_anchor_text(request):
                             'grounding-api-redirect/example" target="_blank" rel="noopener">'
                             "fourseasons.com</a>."
                         ),
-                        "annotations": [],
+                        "annotations": [
+                            {
+                                "type": "url_citation",
+                                "url": (
+                                    "https://vertexaisearch.cloud.google.com/"
+                                    "grounding-api-redirect/example"
+                                ),
+                            }
+                        ],
                     }
                 ],
             },
@@ -64,6 +72,40 @@ def test_gemini_html_anchor_citations_use_redirect_and_anchor_text(request):
     assert "grounding-api-redirect" in run.citations[0].url
     assert run.citations[0].cited_text == "fourseasons.com"
     assert run.citations[0].metadata["citation_origin"] == "html_link"
+    assert run.citations[0].metadata["html_link_observed"] is True
+    assert run.target_cited is ObservationState.YES
+
+
+def test_gemini_citations_are_parsed_from_search_suggestions():
+    request = GroundingRequest(
+        run_id="suggestion-citation",
+        input_phrase="example query",
+        targets=[Target("example.com", MatchMode.ROOT_DOMAIN)],
+    )
+    fixture = {
+        "steps": [
+            {
+                "type": "google_search_result",
+                "result": [
+                    {
+                        "search_suggestions": (
+                            '<a href="https://vertexaisearch.cloud.google.com/'
+                            'grounding-api-redirect/example" target="_blank" rel="noopener">'
+                            "example.com</a>"
+                        )
+                    }
+                ],
+            },
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": "Example answer.", "annotations": []}],
+            },
+        ]
+    }
+    run = GeminiProvider().parse_response(fixture, request)
+    assert len(run.citations) == 1
+    assert run.citations[0].cited_text == "example.com"
+    assert run.citations[0].metadata["gemini_container"] == "search_suggestions"
     assert run.target_cited is ObservationState.YES
 
 

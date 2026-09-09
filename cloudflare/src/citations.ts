@@ -43,6 +43,17 @@ export function targetMatchesCitation(
   return false;
 }
 
+export function appendOrMergeCitation(citations: Citation[], incoming: Citation) {
+  const existing = citations.find((citation) => citation.url === incoming.url);
+  if (!existing) {
+    citations.push(incoming);
+    return;
+  }
+  existing.title ||= incoming.title;
+  existing.citedText ||= incoming.citedText;
+  existing.targetMatch = existing.targetMatch || incoming.targetMatch;
+}
+
 export function parseHtmlLinkCitations(
   text: string,
   request: RunRequest,

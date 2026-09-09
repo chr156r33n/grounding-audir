@@ -8,6 +8,7 @@ import type {
   Source,
 } from "./types.ts";
 import {
+  appendOrMergeCitation,
   parseHtmlLinkCitations,
   parseMarkdownLinkCitations,
   targetMatchesCitation,
@@ -329,14 +330,11 @@ function parseGemini(
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
   const generatedQueries: GeneratedQuery[] = [];
   const citations: Citation[] = [];
-  const seenCitationUrls = new Set<string>();
   const textParts: string[] = [];
   let searchCalls = 0;
 
   const pushCitation = (citation: Citation) => {
-    if (seenCitationUrls.has(citation.url)) return;
-    seenCitationUrls.add(citation.url);
-    citations.push(citation);
+    appendOrMergeCitation(citations, citation);
   };
 
   for (const step of steps) {
@@ -348,6 +346,16 @@ function parseGemini(
         for (const query of args.queries) {
           const normalized = extractQueryText(query);
           if (normalized) generatedQueries.push({ query: normalized, actionType: "search" });
+        }
+      }
+    }
+    if (step.type === "google_search_result" && Array.isArray(step.result)) {
+      for (const result of step.result) {
+        if (!isRecord(result)) continue;
+        const markup = stringValue(result.search_suggestions);
+        if (!markup) continue;
+        for (const citation of parseHtmlLinkCitations(markup, request, targetMatches)) {
+          pushCitation(citation);
         }
       }
     }

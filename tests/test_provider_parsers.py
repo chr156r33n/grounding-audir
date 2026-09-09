@@ -6,6 +6,7 @@ import pytest
 from core.enums import MatchMode, ObservationState
 from core.models import GroundingRequest, Target
 from providers.gemini import GeminiProvider
+from providers.deepseek_web import DeepSeekWebProvider
 from providers.microsoft_bing import MicrosoftBingProvider
 from providers.microsoft_web import MicrosoftWebProvider
 from providers.microsoft_web_iq import MicrosoftWebIQProvider
@@ -43,7 +44,14 @@ def test_openai_distinguishes_sources_and_citations(request):
     assert run.target_cited is ObservationState.YES
     assert len(run.sources) == 2
     assert run.sources[0].cited is ObservationState.YES
-    assert run.citations[0].cited_text is None
+    assert run.citations[0].cited_text == "Four Seasons"
+
+
+def test_deepseek_parses_like_responses_web_search(request):
+    run = DeepSeekWebProvider().parse_response(FIXTURES["openai"], request)
+    assert run.search_performed is ObservationState.YES
+    assert run.target_retrieved is ObservationState.YES
+    assert run.target_cited is ObservationState.YES
 
 
 def test_openai_empty_observable_sources_is_no(request):
@@ -111,7 +119,13 @@ def test_bing_grounding_query_and_target_citation(request):
 
 @pytest.mark.parametrize(
     "provider",
-    [GeminiProvider(), OpenAIWebProvider(), MicrosoftWebProvider(), MicrosoftBingProvider()],
+    [
+        GeminiProvider(),
+        DeepSeekWebProvider(),
+        OpenAIWebProvider(),
+        MicrosoftWebProvider(),
+        MicrosoftBingProvider(),
+    ],
 )
 def test_empty_response_is_defensive(provider, request):
     run = provider.parse_response({}, request)

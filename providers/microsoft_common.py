@@ -8,6 +8,17 @@ from core.enums import ObservationState
 from core.models import GeneratedQuery, GroundingRequest
 
 from .base import CANONICAL_INSTRUCTION, GroundingProvider, as_plain_data
+from .responses_parsing import (
+    RESPONSES_INCLUDE_FIELDS,
+    URL_FIELD_KEYS,
+    collect_search_sources,
+    extract_query_text,
+    extract_title,
+    extract_url,
+    normalize_generated_query,
+    parse_markdown_link_citations,
+    parse_structured_annotations,
+)
 
 
 class StaticTokenCredential:
@@ -23,8 +34,27 @@ class StaticTokenCredential:
         return AccessToken(self._token, 2**31 - 1)
 
 
+def normalize_azure_token(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value.lower().startswith("bearer "):
+        value = value[7:].strip()
+    if value.startswith("{") and value.endswith("}"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("accessToken", "access_token", "token"):
+                token = parsed.get(key)
+                if isinstance(token, str) and token.strip():
+                    return token.strip()
+    return value.splitlines()[0].strip().strip('"').strip("'")
+
+
 def azure_credential(config: dict[str, Any]):
-    token = str(config.get("azure_token", "")).strip()
+    token = normalize_azure_token(str(config.get("azure_token", "")))
     if token:
         return StaticTokenCredential(token)
     from azure.identity import DefaultAzureCredential
@@ -46,7 +76,11 @@ def parse_responses_result(
     output = raw.get("output") or [] if isinstance(raw, dict) else []
     search_calls = 0
     sources_observable = False
+    source_fields_observed: list[str] = []
     source_map: dict[str, Any] = {}
+    anchor_references: list[dict[str, Any]] = []
+    structured_citation_count = 0
+    markdown_citation_count = 0
 
     for output_index, item in enumerate(output):
         item_type = str(item.get("type", ""))
@@ -65,44 +99,58 @@ def parse_responses_result(
             records = _query_records(action) + _query_records(arguments)
             seen_in_call: set[tuple[str, str | None]] = set()
             for query_value, query_url in records:
+                normalized_query = extract_query_text(query_value)
+                if not normalized_query:
+                    continue
                 query_url_constructed = False
                 if not query_url and provider.id == "microsoft_bing":
-                    query_url = f"https://www.bing.com/search?q={quote_plus(query_value)}"
+                    query_url = f"https://www.bing.com/search?q={quote_plus(normalized_query)}"
                     query_url_constructed = True
-                key = (query_value, query_url)
+                key = (normalized_query, query_url)
                 if key in seen_in_call:
                     continue
                 seen_in_call.add(key)
                 query_metadata = {
                     "call_id": item.get("call_id") or item.get("id"),
                     "status": item.get("status"),
+                    "action_type": action.get("type"),
                 }
                 if query_url:
                     query_metadata["query_url"] = query_url
                     query_metadata["query_url_constructed"] = query_url_constructed
                 run.generated_queries.append(
                     GeneratedQuery(
-                        query_value,
+                        normalized_query,
                         len(run.generated_queries) + 1,
                         query_metadata,
                     )
                 )
             if sources_supported and "sources" in action:
                 sources_observable = True
+            source_records, observed_fields = collect_search_sources(item)
+            if observed_fields:
+                sources_observable = True
+                source_fields_observed.extend(observed_fields)
             if sources_supported:
-                for source in action.get("sources") or []:
-                    url = source.get("url")
+                for source in source_records:
+                    url = extract_url(source)
                     if not url:
                         continue
                     built = provider.build_source(
                         request,
                         url,
-                        title=source.get("title"),
+                        title=extract_title(source),
                         position=len(run.sources) + 1,
                         metadata={
                             key: value
                             for key, value in source.items()
-                            if key not in {"url", "title"}
+                            if key not in URL_FIELD_KEYS and key != "title"
+                        }
+                        | {
+                            "source_origin": source.get("source_origin") or "source_list",
+                            "action_type": action.get("type"),
+                            "call_id": item.get("call_id") or item.get("id"),
+                            "call_status": item.get("status"),
                         },
                     )
                     key = built.normalized_url or built.raw_url
@@ -116,37 +164,30 @@ def parse_responses_result(
                     continue
                 text = content.get("text") or ""
                 run.response_text = f"{run.response_text or ''}{text}" or None
-                for annotation in content.get("annotations") or []:
-                    if annotation.get("type") not in {"url_citation", "citation"}:
-                        continue
-                    url = annotation.get("url")
-                    if not url:
-                        continue
-                    start = annotation.get("start_index")
-                    end = annotation.get("end_index")
-                    run.citations.append(
-                        provider.build_citation(
-                            request,
-                            url,
-                            title=annotation.get("title"),
-                            start_index=start,
-                            end_index=end,
-                            cited_text=None,
-                            metadata={
-                                **{
-                                    key: value
-                                    for key, value in annotation.items()
-                                    if key
-                                    not in {"type", "url", "title", "start_index", "end_index"}
-                                },
-                                "output_index": output_index,
-                                "content_index": content_index,
-                            },
-                        )
-                    )
-                    source_key = provider.build_source(request, url).normalized_url or url
+                structured, anchors = parse_structured_annotations(
+                    provider,
+                    request,
+                    text=text,
+                    annotations=content.get("annotations") or [],
+                    output_index=output_index,
+                    content_index=content_index,
+                )
+                structured_citation_count += len(structured)
+                anchor_references.extend(anchors)
+                for citation in structured:
+                    run.citations.append(citation)
+                    source_key = provider.build_source(request, citation.url).normalized_url or citation.url
                     if source_key in source_map:
                         source_map[source_key].cited = ObservationState.YES
+
+    if run.response_text and not structured_citation_count:
+        markdown_citations = parse_markdown_link_citations(
+            provider,
+            request,
+            run.response_text,
+        )
+        markdown_citation_count = len(markdown_citations)
+        run.citations.extend(markdown_citations)
 
     run.response_text = run.response_text or raw.get("output_text")
     run.search_performed = ObservationState.YES if search_calls else ObservationState.NO
@@ -160,16 +201,35 @@ def parse_responses_result(
         "retrieval_note": retrieval_note,
         "sources_observable": sources_observable,
         "sources_requested": sources_supported,
-        "include_fields": ["web_search_call.action.sources"] if sources_supported else [],
+        "include_fields": list(RESPONSES_INCLUDE_FIELDS) if sources_supported else [],
+        "source_fields_observed": sorted(set(source_fields_observed)),
+        "anchor_references": anchor_references,
+        "parsing_summary": {
+            "structured_citations_with_url": structured_citation_count,
+            "markdown_citations": markdown_citation_count,
+            "anchor_references_without_url": len(anchor_references),
+            "observed_source_count": len(run.sources),
+            "opened_page_count": sum(
+                1 for source in run.sources if source.metadata.get("source_origin") == "open_page"
+            ),
+            "source_list_count": sum(
+                1
+                for source in run.sources
+                if source.metadata.get("source_origin", "source_list") == "source_list"
+            ),
+        },
+        "citation_urls_observable": bool(structured_citation_count or markdown_citation_count),
         "response_id": raw.get("id"),
         "response_status": raw.get("status"),
         "actual_model": raw.get("model"),
         "service_tier": raw.get("service_tier"),
         "incomplete_details": raw.get("incomplete_details"),
     }
+    citation_complete = not anchor_references or bool(run.citations)
     return provider.finish_states(
         run,
         retrieval_complete=sources_supported and sources_observable,
+        citation_complete=citation_complete,
     )
 
 
@@ -187,11 +247,18 @@ def _query_records(value: Any) -> list[tuple[str, str | None]]:
         )
         for key, item in value.items():
             normalized_key = key.lower()
-            if normalized_key in {"query", "search_query"} and isinstance(item, str):
-                records.append((item, query_url))
+            if normalized_key in {"query", "search_query"}:
+                text = extract_query_text(item)
+                if text:
+                    records.append((text, query_url))
+                elif isinstance(item, str):
+                    records.append((item, query_url))
             elif normalized_key in {"queries", "search_queries"} and isinstance(item, list):
                 for nested in item:
-                    if isinstance(nested, str):
+                    text = extract_query_text(nested)
+                    if text:
+                        records.append((text, None))
+                    elif isinstance(nested, str):
                         records.append((nested, None))
                     else:
                         records.extend(_query_records(nested))

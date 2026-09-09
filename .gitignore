@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .streamlit/secrets.toml
+cloudflare/node_modules/
+cloudflare/.wrangler/
+cloudflare/.dev.vars

@@ -3,7 +3,13 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from core.debug import DebugTrace, build_run_debug_context, debug_mode_enabled, record_api_request
+from core.debug import (
+    DebugTrace,
+    attach_debug_to_exception,
+    build_run_debug_context,
+    debug_mode_enabled,
+    record_api_request,
+)
 from core.diagnostics import attach_observation_diagnostics
 from core.enums import ObservationState, ProviderType
 from core.models import (
@@ -79,11 +85,16 @@ class MicrosoftWebIQProvider(GroundingProvider):
         except Exception as exc:
             trace.event("http_request_failed")
             if debug:
-                run = self.new_run(request)
-                run.metadata["debug"] = {
-                    "context": build_run_debug_context(self.id, request, config),
-                    "trace": trace.events,
-                }
+                attach_debug_to_exception(
+                    exc,
+                    {
+                        "context": build_run_debug_context(self.id, request, config),
+                        "trace": trace.events,
+                        "api": "webiq.web",
+                        "operation": "web.search",
+                        "request_body": request_body,
+                    },
+                )
             raise
         run = self.parse_response(response, request)
         run.latency_ms = round((perf_counter() - started) * 1000)

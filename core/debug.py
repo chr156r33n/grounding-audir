@@ -103,16 +103,35 @@ def record_exception_debug(run: GroundingRun, exc: Exception) -> None:
     )
 
 
+def attach_debug_to_exception(exc: Exception, debug: dict[str, Any]) -> None:
+    """Carry sanitised provider diagnostics into the execution wrapper."""
+    try:
+        setattr(exc, "grounding_debug", redact_secrets(debug))
+    except (AttributeError, TypeError):
+        pass
+
+
+def exception_debug(exc: Exception) -> dict[str, Any]:
+    carried = getattr(exc, "grounding_debug", None)
+    return redact_secrets(carried) if isinstance(carried, dict) else {}
+
+
 def openai_request_body(model: str, request: GroundingRequest, tool: dict[str, Any]) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
+    from providers.responses_parsing import RESPONSES_INCLUDE_FIELDS
 
     return {
         "model": model,
         "input": CANONICAL_INSTRUCTION.format(query=request.input_phrase),
         "tools": [tool],
         "tool_choice": "required",
-        "include": ["web_search_call.action.sources"],
+        "include": list(RESPONSES_INCLUDE_FIELDS),
     }
+
+
+def deepseek_request_body(model: str, request: GroundingRequest, tool: dict[str, Any]) -> dict[str, Any]:
+    body = openai_request_body(model, request, tool)
+    return body
 
 
 def gemini_request_body(model: str, request: GroundingRequest) -> dict[str, Any]:
@@ -131,13 +150,14 @@ def foundry_web_search_request_body(
     tool: dict[str, Any],
 ) -> dict[str, Any]:
     from providers.base import CANONICAL_INSTRUCTION
+    from providers.responses_parsing import RESPONSES_INCLUDE_FIELDS
 
     return {
         "model": model,
         "input": CANONICAL_INSTRUCTION.format(query=request.input_phrase),
         "tools": [tool],
         "tool_choice": "required",
-        "include": ["web_search_call.action.sources"],
+        "include": list(RESPONSES_INCLUDE_FIELDS),
     }
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import pandas as pd
@@ -11,7 +12,12 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
+from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
+from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
+from core.credentials_help import render_credentials_help
 from providers.registry import PROVIDERS
+from providers.responses_parsing import extract_query_text
 
 st.set_page_config(page_title="Grounding Source Observatory", page_icon="🔭", layout="wide")
 
@@ -44,15 +50,23 @@ def main() -> None:
     )
     _methodology_help()
 
-    submitted, values, selected, configs = _configuration_form()
-    if submitted:
+    action, values, selected, configs = _configuration_form()
+    if action == "discover":
+        _start_query_discovery(values, configs)
+    elif action == "run":
         _start_run(values, selected, configs)
 
-    if st.session_state.get("grounding_runs"):
+    runs = st.session_state.get("grounding_runs") or []
+    discovery = st.session_state.get("query_discovery")
+    if runs:
         _render_results(
             st.session_state["grounding_request"],
-            st.session_state["grounding_runs"],
+            runs,
         )
+    elif discovery:
+        st.divider()
+        st.header("Results")
+        _render_query_discovery(discovery)
 
 
 def _render_provider_field(provider_id: str, field: ProviderField) -> str:
@@ -85,9 +99,13 @@ def _render_debug_panel(run: GroundingRun, *, expanded: bool = False) -> None:
     if not debug and run.raw_response is None:
         return
     with st.expander("Debug trace", expanded=expanded):
+        execution_trace = debug.get("execution_trace") or []
+        if execution_trace:
+            st.markdown("**Execution timeline**")
+            st.dataframe(execution_trace, hide_index=True, use_container_width=True)
         trace = debug.get("trace") or []
         if trace:
-            st.markdown("**Execution timeline**")
+            st.markdown("**Provider request timeline**")
             st.dataframe(trace, hide_index=True, use_container_width=True)
         if debug.get("context"):
             st.markdown("**Run context**")
@@ -95,6 +113,9 @@ def _render_debug_panel(run: GroundingRun, *, expanded: bool = False) -> None:
         if debug.get("request_body"):
             st.markdown("**API request body (sanitised)**")
             st.json(debug["request_body"])
+        if debug.get("requests"):
+            st.markdown("**API requests (sanitised)**")
+            st.json(debug["requests"])
         if debug.get("response_summary"):
             st.markdown("**Response summary**")
             st.json(debug["response_summary"])
@@ -117,6 +138,44 @@ def _configuration_form():
         query = st.text_input(
             "Grounding/search phrase",
             placeholder="best luxury family hotels in Hong Kong",
+            key="input_query",
+        )
+        discovery_url = st.text_input(
+            "Optional source URL for query discovery",
+            placeholder="https://example.com/page-to-test",
+            help=(
+                "Used as page context for query generation. When pasted copy is provided below, "
+                "the URL is optional but still helps anchor suggestions to the right page."
+            ),
+        )
+        discovery_paste = st.text_area(
+            "Or paste visible page copy (skips fetch)",
+            placeholder=(
+                "Paste what you see on the page — titles, headings, promos, and body copy. "
+                "The LLM interprets unstructured paste and ignores addresses, phones, and nav boilerplate."
+            ),
+            height=160,
+            help=(
+                "If this field is filled, the app will not download the URL. Paste visible page "
+                "copy as you would copy it from the browser; raw HTML also works."
+            ),
+        )
+        discovery_fetch_profile = st.selectbox(
+            "URL fetch profile",
+            options=list(FETCH_PROFILES.keys()),
+            format_func=lambda key: FETCH_PROFILES[key],
+            index=0,
+            help=(
+                "Browser-like requests use a mainstream User-Agent and typical document headers. "
+                "Use transparent only if you prefer an identifiable bot string."
+            ),
+        )
+        discovery_count = st.slider(
+            "Query suggestions",
+            min_value=3,
+            max_value=10,
+            value=6,
+            help="Maximum number of merged suggestions to keep across Gemini and OpenAI.",
         )
         target = st.text_input("Target domain, hostname, or URL prefix", placeholder="fourseasons.com")
         col1, col2, col3 = st.columns(3)
@@ -156,6 +215,7 @@ def _configuration_form():
 
         st.subheader("Provider credentials / configuration")
         st.caption("Secrets remain in this Streamlit process and are never included in exports.")
+        render_credentials_help()
         configs: dict[str, dict[str, str]] = {}
         for provider in PROVIDERS.values():
             with st.expander(provider.name, expanded=False):
@@ -164,7 +224,18 @@ def _configuration_form():
                     config[field.key] = _render_provider_field(provider.id, field)
                 configs[provider.id] = config
 
-        submitted = st.form_submit_button("Run test", type="primary", use_container_width=True)
+        discovery_col, run_col = st.columns(2)
+        with discovery_col:
+            discover_submitted = st.form_submit_button(
+                "Discover queries from URL",
+                use_container_width=True,
+            )
+        with run_col:
+            run_submitted = st.form_submit_button(
+                "Run test",
+                type="primary",
+                use_container_width=True,
+            )
     values = {
         "query": query,
         "target": target,
@@ -173,14 +244,57 @@ def _configuration_form():
         "language": LANGUAGES[language_label],
         "timeout_seconds": timeout_seconds,
         "debug_mode": debug_mode,
+        "discovery_url": discovery_url.strip(),
+        "discovery_paste": discovery_paste.strip(),
+        "discovery_fetch_profile": discovery_fetch_profile,
+        "discovery_count": discovery_count,
     }
-    return submitted, values, selected, configs
+    action = "discover" if discover_submitted else "run" if run_submitted else None
+    return action, values, selected, configs
+
+
+def _start_query_discovery(
+    values,
+    configs: dict[str, dict[str, str]],
+) -> QueryDiscoveryResult | None:
+    if not values["discovery_url"] and not values.get("discovery_paste"):
+        st.error("Enter a source URL to fetch, or paste page HTML/text below.")
+        return None
+    status = st.empty()
+    if values.get("discovery_paste"):
+        status.info("⟳ Query discovery — analysing pasted page copy")
+    else:
+        status.info("⟳ Query discovery — fetching and analysing page")
+    accept_language = values.get("market") or values.get("language") or "en-GB"
+    try:
+        discovery = call_discover_queries(
+            values["discovery_url"],
+            openai_config=configs.get("openai_web"),
+            gemini_config=configs.get("gemini"),
+            count=values["discovery_count"],
+            debug=values["debug_mode"],
+            page_content=values.get("discovery_paste") or None,
+            fetch_profile=values.get("discovery_fetch_profile") or DEFAULT_FETCH_PROFILE,
+            accept_language=accept_language,
+        )
+    except QueryDiscoveryCompatibilityError as exc:
+        st.error(str(exc))
+        return None
+    st.session_state["query_discovery"] = discovery
+    st.session_state["grounding_runs"] = []
+    st.session_state.pop("grounding_request", None)
+    if discovery.candidates:
+        status.success(
+            f"✓ Query discovery — {len(discovery.candidates)} suggestions generated"
+        )
+    else:
+        status.error(
+            f"Query discovery — {discovery.error or 'No suggestions were generated.'}"
+        )
+    return discovery
 
 
 def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) -> None:
-    if not values["query"].strip():
-        st.error("Enter a grounding/search phrase.")
-        return
     if not values["target"].strip() or not normalize_url(values["target"]):
         st.error("Enter a valid target domain, hostname, or HTTP(S) URL.")
         return
@@ -188,9 +302,25 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         st.error("Select at least one provider.")
         return
 
+    query = values["query"].strip()
+    if values["discovery_url"] or values.get("discovery_paste"):
+        discovery = _start_query_discovery(values, configs)
+        if discovery and discovery.candidates and not query:
+            query = discovery.candidates[0].query
+            st.session_state["input_query"] = query
+        if not query:
+            st.error(
+                "Enter a grounding/search phrase, or provide page content that yields "
+                "query suggestions."
+            )
+            return
+    elif not query:
+        st.error("Enter a grounding/search phrase.")
+        return
+
     request = GroundingRequest(
         run_id=str(uuid4()),
-        input_phrase=values["query"].strip(),
+        input_phrase=query,
         targets=[Target(values["target"].strip(), values["match_mode"])],
         market=values["market"],
         language=values["language"],
@@ -204,6 +334,7 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
     st.session_state["grounding_runs"] = []
 
     st.subheader("Running test")
+
     statuses = {
         provider_id: st.empty()
         for provider_id in selected
@@ -232,6 +363,9 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     st.divider()
     st.header("Results")
     st.caption(f"Run ID: {request.run_id}")
+    discovery = st.session_state.get("query_discovery")
+    if discovery:
+        _render_query_discovery(discovery)
     st.subheader(f"Target citation summary — {request.targets[0].value}")
     columns = st.columns(min(4, len(runs)))
     for index, run in enumerate(runs):
@@ -269,6 +403,158 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
         )
 
 
+def _use_discovered_query(query: str) -> None:
+    st.session_state["input_query"] = query
+
+
+def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
+    st.subheader("URL query discovery")
+    if discovery.error:
+        st.warning(discovery.error)
+    if discovery.evidence:
+        evidence = discovery.evidence
+        source_note = (
+            "Pasted page copy"
+            if evidence.input_source == "paste"
+            else f"Fetched ({evidence.fetch_profile or 'browser'} profile)"
+        )
+        st.caption(
+            f"{source_note} · {evidence.final_url or evidence.requested_url} · "
+            f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
+        )
+        if evidence.key_terms:
+            st.caption(f"Distinctive terms: {', '.join(evidence.key_terms)}")
+    if discovery.candidates:
+        st.dataframe(
+            [
+                {
+                    "Query": item.query,
+                    "Why this page fits": item.rationale,
+                    "DOM evidence": item.evidence,
+                    "Generated by": ", ".join(item.generators),
+                }
+                for item in discovery.candidates
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Suggestions are hypotheses, not ranking guarantees. Choose one to place it "
+            "in the query field, then run the test again."
+        )
+        button_columns = st.columns(2)
+        for index, item in enumerate(discovery.candidates):
+            with button_columns[index % 2]:
+                st.button(
+                    f"Use query {index + 1}: {item.query}",
+                    key=f"use_discovered_{index}_{hash(item.query)}",
+                    on_click=_use_discovered_query,
+                    args=(item.query,),
+                    use_container_width=True,
+                )
+
+    with st.expander("Page evidence"):
+        if not discovery.evidence:
+            st.info("No page evidence was extracted.")
+        else:
+            evidence = discovery.evidence
+            st.write(
+                {
+                    "requested_url": evidence.requested_url,
+                    "final_url": evidence.final_url,
+                    "canonical_url": evidence.canonical_url,
+                    "title": evidence.title,
+                    "description": evidence.description,
+                    "language": evidence.language,
+                    "input_source": evidence.input_source,
+                    "fetch_profile": evidence.fetch_profile,
+                    "key_terms": evidence.key_terms,
+                    "http_status": evidence.http_status,
+                    "content_type": evidence.content_type,
+                    "downloaded_bytes": evidence.downloaded_bytes,
+                    "redirects": evidence.redirects,
+                }
+            )
+            st.dataframe(
+                [
+                    {"Kind": chunk.kind, "Score": chunk.score, "Text": chunk.text}
+                    for chunk in evidence.chunks
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    st.markdown("#### Query generators")
+    if discovery.generators:
+        st.dataframe(
+            [
+                {
+                    "Provider": item.provider_name,
+                    "Model": item.model,
+                    "Status": item.status,
+                    "Suggestions": len(item.queries),
+                    "Latency (ms)": item.latency_ms,
+                    "Error": item.error,
+                }
+                for item in discovery.generators
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("No query-generation API was called.")
+
+    st.download_button(
+        "Download query suggestions JSON",
+        json.dumps(
+            discovery.to_dict(include_raw=False),
+            indent=2,
+            ensure_ascii=False,
+        ),
+        file_name="query-discovery.json",
+        mime="application/json",
+    )
+
+    if discovery.debug_mode:
+        with st.expander("Query discovery debug", expanded=True):
+            if discovery.debug:
+                st.markdown("**Discovery diagnostics**")
+                st.json(discovery.debug)
+            if discovery.evidence:
+                st.markdown("**Fetch diagnostics**")
+                st.json(
+                    {
+                        "requested_url": discovery.evidence.requested_url,
+                        "final_url": discovery.evidence.final_url,
+                        "redirects": discovery.evidence.redirects,
+                        "resolved_addresses": discovery.evidence.resolved_addresses,
+                        "request_headers": discovery.evidence.request_headers,
+                        "response_headers": discovery.evidence.response_headers,
+                        "http_status": discovery.evidence.http_status,
+                        "content_type": discovery.evidence.content_type,
+                        "downloaded_bytes": discovery.evidence.downloaded_bytes,
+                    }
+                )
+            for generator in discovery.generators:
+                st.markdown(f"**{generator.provider_name} / {generator.model}**")
+                st.json(generator.debug)
+                if generator.raw_response is not None:
+                    from core.export import redact_secrets
+
+                    st.markdown("Raw response (sanitised)")
+                    st.json(redact_secrets(generator.raw_response))
+            st.download_button(
+                "Download query discovery debug JSON",
+                json.dumps(
+                    discovery.to_dict(include_raw=True),
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                file_name="query-discovery-debug.json",
+                mime="application/json",
+            )
+
+
 def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -289,6 +575,33 @@ def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     )
 
 
+def _partition_sources(sources):
+    opened = [
+        item for item in sources if item.metadata.get("source_origin") == "open_page"
+    ]
+    listed = [
+        item for item in sources if item.metadata.get("source_origin") != "open_page"
+    ]
+    return opened, listed
+
+
+def _source_table_rows(sources):
+    return [
+        {
+            "Order": item.retrieval_position,
+            "Origin": item.metadata.get("source_origin", "source_list"),
+            "Domain": item.registrable_domain,
+            "URL": item.raw_url,
+            "Title": item.title,
+            "Call status": item.metadata.get("call_status"),
+            "Target match": bool(item.target_matches),
+            "Retrieved": STATE_LABELS[item.retrieved],
+            "Cited in answer": STATE_LABELS[item.cited],
+        }
+        for item in sources
+    ]
+
+
 def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
     with st.expander(run.provider_name):
         st.markdown("#### Summary")
@@ -304,6 +617,10 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
         st.write(summary)
         if run.error:
             st.error(run.error.safe_message)
+            error_details = run.metadata.get("error_details")
+            if error_details:
+                with st.expander("API error details"):
+                    st.json(error_details)
             if run.status.value == "timed_out":
                 timeout = run.metadata.get("timeout_seconds")
                 retries = run.metadata.get("retry_count")
@@ -341,11 +658,16 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
 
         st.markdown("#### Generated queries")
         if run.generated_queries:
+            st.caption(
+                "Queries emitted by the provider's search tool. Internal `ws_call_id` suffixes "
+                "are stripped when present."
+            )
             st.dataframe(
                 [
                     {
                         "Sequence": item.sequence,
-                        "Query": item.query,
+                        "Query": extract_query_text(item.query) or item.query,
+                        "Action": item.metadata.get("action_type"),
                         "Search query URL": item.metadata.get("query_url"),
                     }
                     for item in run.generated_queries
@@ -359,30 +681,45 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
         else:
             st.info("Generated queries were not exposed in this response.")
 
-        st.markdown("#### Observed sources")
-        if run.sources:
+        opened_pages, listed_sources = _partition_sources(run.sources)
+
+        st.markdown("#### Opened pages")
+        st.caption(
+            "Pages the search tool opened during the run. These are retrieval/tool evidence "
+            "and are not the same as inline URL citations in the final answer."
+        )
+        if opened_pages:
             st.dataframe(
-                [
-                    {
-                        "Order": item.retrieval_position,
-                        "Domain": item.registrable_domain,
-                        "URL": item.raw_url,
-                        "Title": item.title,
-                        "Target match": bool(item.target_matches),
-                        "Retrieved": STATE_LABELS[item.retrieved],
-                        "Cited": STATE_LABELS[item.cited],
-                    }
-                    for item in run.sources
-                ],
+                _source_table_rows(opened_pages),
                 column_config={"URL": st.column_config.LinkColumn("URL")},
                 hide_index=True,
                 use_container_width=True,
             )
         else:
+            st.info("No `open_page` URLs were exposed in the provider response.")
+
+        st.markdown("#### Consulted source URLs")
+        st.caption(
+            "URLs returned in explicit consulted-source lists such as "
+            "`web_search_call.action.sources` when the provider exposes them."
+        )
+        if listed_sources:
+            st.dataframe(
+                _source_table_rows(listed_sources),
+                column_config={"URL": st.column_config.LinkColumn("URL")},
+                hide_index=True,
+                use_container_width=True,
+            )
+        elif not opened_pages:
             st.info(
                 state_notes.get("target_retrieved")
                 or run.metadata.get("retrieval_note")
                 or "No retrieved-source list was exposed by this provider/API."
+            )
+        else:
+            st.info(
+                "No explicit consulted-source list was returned. Use Opened pages above for "
+                "tool-level URL evidence."
             )
 
         st.markdown("#### Grounding content / chunks")
@@ -413,7 +750,18 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
                 use_container_width=True,
             )
         else:
-            st.info("No citation URLs were exposed in this response.")
+            st.info(
+                "No inline URL citations were exposed in the final answer. Check Opened pages "
+                "above if the provider opened target URLs during search."
+            )
+        anchor_references = run.metadata.get("anchor_references") or []
+        if anchor_references:
+            st.markdown("#### Anchor references without URLs")
+            st.caption(
+                "Some providers return inline anchor text or titles without exposing the "
+                "underlying citation URL. These cannot be used for target-domain matching."
+            )
+            st.dataframe(anchor_references, hide_index=True, use_container_width=True)
 
         st.markdown("#### Final response")
         st.text(run.response_text or "No final response text was exposed.")
@@ -445,6 +793,15 @@ def _methodology_help() -> None:
             """
 - Citation presence is not the same as retrieval presence.
 - **UNKNOWN does not mean NO**: some providers do not expose their retrieved result set.
+- **Target retrieved** uses four states, not two:
+  - **YES** — the provider returned a consulted-source list and your target domain appears in it.
+  - **NO** — the provider returned a complete consulted-source list and your target is absent.
+  - **UNKNOWN** — search may have run, but the API did not expose enough retrieval evidence to
+    prove YES or NO (for example Gemini citations without a SERP list, or Bing without raw
+    grounding output).
+  - **N/A** — retrieval is not applicable for that provider type.
+- **Target cited** also requires an exposed **citation URL**. Anchor text or page titles alone
+  are shown separately and do not count as URL citations.
 - Source, retrieval, and citation order must not be treated as conventional organic rank.
 - Provider and model choices can change results, and grounding runs are inherently variable.
 """

@@ -7,12 +7,18 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any
 
 from core.diagnostics import attach_observation_diagnostics
+from core.provider_errors import (
+    auth_error_message,
+    extract_provider_error_details,
+    invalid_config_message,
+)
 from providers.base import GroundingProvider
 
 from core.debug import (
     DebugTrace,
     build_run_debug_context,
     debug_mode_enabled,
+    exception_debug,
     inject_debug_config,
     record_exception_debug,
     summarize_raw_response,
@@ -41,9 +47,10 @@ def execute_providers(
     """Run providers concurrently and yield each result on completion or timeout."""
     if not jobs:
         return
+    explicit_timeout = timeout_seconds is not None
     default_timeout = (
-        timeout_seconds
-        if timeout_seconds is not None
+        max(0.01, float(timeout_seconds))
+        if explicit_timeout
         else configured_timeout_seconds(request)
     )
     executor = ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="grounding-provider")
@@ -51,10 +58,14 @@ def execute_providers(
     for provider, config in jobs:
         if on_progress:
             on_progress(provider.id, "running")
-        effective_timeout = provider_timeout_seconds(
-            request,
-            provider,
-            default=default_timeout,
+        effective_timeout = (
+            default_timeout
+            if explicit_timeout
+            else provider_timeout_seconds(
+                request,
+                provider,
+                default=default_timeout,
+            )
         )
         enriched_config = inject_timeout_config(
             inject_debug_config(config, debug_mode_enabled(config, request)),
@@ -114,7 +125,11 @@ def execute_providers(
                 try:
                     run = future.result()
                 except Exception as exc:  # Defensive: wrapper should normally convert this.
-                    run = _failure_run(provider, request, _classify_exception(exc))
+                    run = _failure_run(
+                        provider,
+                        request,
+                        _classify_exception(exc, provider_id=provider.id),
+                    )
                 if on_progress:
                     on_progress(provider.id, run.status.value)
                 yield run
@@ -130,6 +145,7 @@ def _run_with_retries(
     deadline: float,
 ) -> GroundingRun:
     started = time.monotonic()
+    debug = debug_mode_enabled(config, request)
     validation_errors = provider.validate_config(config)
     if validation_errors:
         run = _failure_run(
@@ -142,10 +158,14 @@ def _run_with_retries(
             ),
         )
         run.latency_ms = 0
+        if debug:
+            run.metadata["debug"] = {
+                "context": build_run_debug_context(provider.id, request, config),
+                "validation_errors": validation_errors,
+            }
         return run
 
     retries = 0
-    debug = debug_mode_enabled(config, request)
     trace = DebugTrace(provider.id, debug)
     trace.event(
         "execution_started",
@@ -172,6 +192,7 @@ def _run_with_retries(
             run = provider.run(request, config)
             run.metadata["retry_count"] = retries
             run.metadata["timeout_seconds"] = request_timeout_seconds(config)
+            trace.event("provider_run_completed", status=run.status.value)
             if debug:
                 run.metadata.setdefault("debug", {})
                 run.metadata["debug"]["context"] = build_run_debug_context(
@@ -179,26 +200,27 @@ def _run_with_retries(
                     request,
                     config,
                 )
-                existing_trace = run.metadata["debug"].get("trace") or []
-                run.metadata["debug"]["trace"] = existing_trace + trace.events
+                run.metadata["debug"]["execution_trace"] = trace.events
                 if run.raw_response is not None:
                     run.metadata["debug"]["response_summary"] = summarize_raw_response(
                         run.raw_response
                     )
-            trace.event("provider_run_completed", status=run.status.value)
             return run
         except Exception as exc:
             trace.event("provider_run_failed", attempt=retries + 1, error_type=type(exc).__name__)
-            error = _classify_exception(exc)
+            error = _classify_exception(exc, provider_id=provider.id, config=config)
             if not error.retryable or retries >= max_retries:
                 run = _failure_run(provider, request, error)
                 run.metadata["retry_count"] = retries
                 run.metadata["timeout_seconds"] = request_timeout_seconds(config)
+                run.metadata["error_details"] = extract_provider_error_details(exc)
                 run.latency_ms = round((time.monotonic() - started) * 1000)
                 if debug:
+                    provider_debug = exception_debug(exc)
                     run.metadata["debug"] = {
+                        **provider_debug,
                         "context": build_run_debug_context(provider.id, request, config),
-                        "trace": trace.events,
+                        "execution_trace": trace.events,
                     }
                     record_exception_debug(run, exc)
                 return run
@@ -267,12 +289,17 @@ def _timeout_run(
     if debug_trace is not None:
         run.metadata["debug"] = {
             "context": debug_context or build_run_debug_context(provider.id, request, {}),
-            "trace": debug_trace,
+            "execution_trace": debug_trace,
         }
     return attach_observation_diagnostics(run)
 
 
-def _classify_exception(exc: Exception) -> ProviderError:
+def _classify_exception(
+    exc: Exception,
+    *,
+    provider_id: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> ProviderError:
     status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     if not isinstance(status, int):
         response = getattr(exc, "response", None)
@@ -281,7 +308,7 @@ def _classify_exception(exc: Exception) -> ProviderError:
     if status in {401, 403} or "authentication" in name or "credential" in name:
         error_type, message, retryable = (
             ErrorType.AUTH_ERROR,
-            "Authentication failed. Check this provider's credentials and access.",
+            auth_error_message(exc, provider_id=provider_id, config=config),
             False,
         )
     elif status == 429 or "ratelimit" in name:
@@ -305,7 +332,7 @@ def _classify_exception(exc: Exception) -> ProviderError:
     elif status in {400, 404, 422}:
         error_type, message, retryable = (
             ErrorType.INVALID_CONFIG,
-            "The provider rejected the request configuration or model.",
+            invalid_config_message(exc, provider_id=provider_id, config=config),
             False,
         )
     else:

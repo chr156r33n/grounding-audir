@@ -47,3 +47,55 @@ def test_provider_has_independent_timeout():
     }
     assert runs["good"].status is RunStatus.COMPLETE
     assert runs["slow"].status is RunStatus.TIMED_OUT
+
+
+def test_debug_mode_captures_failure_context_and_redacts_secrets():
+    request = GroundingRequest(
+        "run",
+        "query",
+        [Target("example.com")],
+        provider_options={"debug_mode": True},
+    )
+    run = next(
+        execute_providers(
+            request,
+            [(FakeProvider("bad", "fail"), {"api_key": "do-not-display"})],
+            max_retries=0,
+        )
+    )
+
+    assert run.status is RunStatus.FAILED
+    assert run.metadata["debug"]["context"]["config"]["api_key"] == "[REDACTED]"
+    assert run.metadata["debug"]["exception"]["type"] == "RuntimeError"
+    assert run.metadata["debug"]["execution_trace"]
+
+
+def test_invalid_config_includes_foundry_configuration_hint():
+    class BadConfigProvider(FakeProvider):
+        def run(self, request, config):
+            exc = RuntimeError("ignored")
+            exc.status_code = 404
+            exc.body = {"error": {"message": "Deployment missing-model not found"}}
+            raise exc
+
+    request = GroundingRequest("run", "query", [Target("example.com")])
+    run = next(
+        execute_providers(
+            request,
+            [
+                (
+                    BadConfigProvider("microsoft_web", "bad"),
+                    {
+                        "project_endpoint": "https://x.services.ai.azure.com/api/projects/demo",
+                        "model": "missing-model",
+                    },
+                )
+            ],
+            max_retries=0,
+        )
+    )
+
+    assert run.status is RunStatus.FAILED
+    assert run.error.type is ErrorType.INVALID_CONFIG
+    assert "missing-model" in run.error.safe_message
+    assert run.metadata.get("error_details", {}).get("status_code") == 404

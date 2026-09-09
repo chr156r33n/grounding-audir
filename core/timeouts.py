@@ -45,7 +45,14 @@ def provider_timeout_seconds(
 
 
 def request_timeout_seconds(config: dict[str, Any], *, default: float = DEFAULT_PROVIDER_TIMEOUT_SECONDS) -> float:
-    return clamp_timeout_seconds(config.get(TIMEOUT_CONFIG_KEY, default), default=default)
+    try:
+        parsed = float(config.get(TIMEOUT_CONFIG_KEY, default))
+    except (TypeError, ValueError):
+        parsed = default
+    # This value is injected by the executor after user-facing values have
+    # already been clamped. Keeping small programmatic overrides is useful for
+    # deterministic timeout tests.
+    return max(0.01, parsed)
 
 
 def inject_timeout_config(config: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:

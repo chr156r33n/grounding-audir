@@ -39,11 +39,20 @@ OPENAI_WEB_SEARCH = ModelCatalog(
         ModelChoice("gpt-5.4-nano", "gpt-5.4-nano"),
         ModelChoice("gpt-4.1", "gpt-4.1"),
         ModelChoice("gpt-4.1-mini", "gpt-4.1-mini"),
+    ),
+)
+
+DEEPSEEK_WEB_SEARCH = ModelCatalog(
+    default="deepseek-v4-flash",
+    documentation_url="https://api-docs.deepseek.com/api/create-response/",
+    documentation_checked="2026-09-07",
+    choices=(
         ModelChoice(
-            "gpt-5-search-api",
-            "gpt-5-search-api",
-            "Chat Completions search path; legacy integration only",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+            "Fast default for Responses API web_search",
         ),
+        ModelChoice("deepseek-v4-pro", "deepseek-v4-pro", "Higher-quality web search"),
     ),
 )
 
@@ -107,6 +116,40 @@ MICROSOFT_BING_GROUNDING = ModelCatalog(
         ModelChoice("gpt-5.4", "gpt-5.4"),
     ),
 )
+
+
+_AZURE_TOKEN_HELP = (
+    "Leave empty to use DefaultAzureCredential on the machine running Streamlit "
+    "(requires `az login` in that same environment). Otherwise paste a fresh Foundry token "
+    "from Azure Cloud Shell using: "
+    "az account get-access-token --scope https://ai.azure.com/.default "
+    "--query accessToken -o tsv. Paste only the token string, not the JSON wrapper."
+)
+
+
+@dataclass(frozen=True)
+class AzureTokenField:
+    help: str = _AZURE_TOKEN_HELP
+
+
+azure_token_field = AzureTokenField()
+
+
+def deployment_field(catalog: ModelCatalog, *, label: str = "Model deployment") -> "ProviderField":
+    from core.models import ProviderField
+
+    return ProviderField(
+        key="model",
+        label=label,
+        required=True,
+        default=catalog.default,
+        help=(
+            "Enter the exact deployment name from your Foundry project "
+            "(Models + endpoints → Deployments). Documented web-search-capable "
+            f"models checked {catalog.documentation_checked}: "
+            f"{', '.join(catalog.values)}. See {catalog.documentation_url}"
+        ),
+    )
 
 
 def model_field(catalog: ModelCatalog, *, label: str = "Model") -> "ProviderField":

@@ -47,6 +47,24 @@ test("targetMatchesCitation uses anchor text when redirect URL does not match", 
   assert.equal(targetMatchesCitation(request, redirect, targetMatches, "example.com"), true);
 });
 
+test("targetMatchesCitation prefers domain title over unrelated cited prose", () => {
+  const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+  const citedText =
+    "**est** is a **1-Michelin-starred** fine-dining restaurant located on the 39th floor.";
+  assert.equal(
+    targetMatchesCitation(request, redirect, targetMatches, "example.com", citedText),
+    true,
+  );
+  assert.equal(
+    targetMatchesCitation(request, redirect, targetMatches, citedText, "example.com"),
+    true,
+  );
+  assert.equal(
+    targetMatchesCitation(request, redirect, targetMatches, citedText),
+    false,
+  );
+});
+
 test("later HTML citation promotes a duplicate structured redirect to target match", () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
   const citations = [

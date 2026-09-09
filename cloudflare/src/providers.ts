@@ -269,8 +269,8 @@ function parseResponses(
               request,
               url,
               targetMatches,
-              sliceText(text, annotation.start_index, annotation.end_index) ||
-                stringValue(annotation.title || annotation.name),
+              stringValue(annotation.title || annotation.name),
+              sliceText(text, annotation.start_index, annotation.end_index),
             ),
           });
         }
@@ -374,7 +374,7 @@ function parseGemini(
           url,
           title,
           citedText,
-          targetMatch: targetMatchesCitation(request, url, targetMatches, citedText || title),
+          targetMatch: targetMatchesCitation(request, url, targetMatches, title, citedText),
         });
       }
     }

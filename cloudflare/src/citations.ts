@@ -33,12 +33,14 @@ export function targetMatchesCitation(
   request: RunRequest,
   url: string,
   targetMatches: (request: RunRequest, candidate: string) => boolean,
-  hint?: string,
+  ...hints: Array<string | undefined>
 ) {
   if (targetMatches(request, url)) return true;
   if (!isGroundingRedirectUrl(url)) return false;
-  for (const candidate of citationTargetHints(hint)) {
-    if (targetMatches(request, candidate)) return true;
+  for (const hint of hints) {
+    for (const candidate of citationTargetHints(hint)) {
+      if (targetMatches(request, candidate)) return true;
+    }
   }
   return false;
 }

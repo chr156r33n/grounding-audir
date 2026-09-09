@@ -349,6 +349,16 @@ function parseGemini(
         }
       }
     }
+    if (step.type === "google_search_result" && Array.isArray(step.result)) {
+      for (const result of step.result) {
+        if (!isRecord(result)) continue;
+        const markup = stringValue(result.search_suggestions);
+        if (!markup) continue;
+        for (const citation of parseHtmlLinkCitations(markup, request, targetMatches)) {
+          pushCitation(citation);
+        }
+      }
+    }
     if (step.type !== "model_output" || !Array.isArray(step.content)) continue;
     for (const content of step.content) {
       if (!isRecord(content) || typeof content.text !== "string") continue;

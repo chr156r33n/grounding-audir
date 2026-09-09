@@ -118,6 +118,9 @@ class GeminiProvider(GroundingProvider):
                     markup = result.get("search_suggestions")
                     if markup:
                         suggestions.append(markup)
+                        for citation in parse_html_link_citations(self, request, markup):
+                            citation.metadata["gemini_container"] = "search_suggestions"
+                            _append_or_merge_citation(run.citations, citation)
             elif step_type == "model_output":
                 for content_index, content in enumerate(step.get("content") or []):
                     if content.get("type") != "text":

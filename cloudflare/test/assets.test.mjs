@@ -8,6 +8,8 @@ test("edge UI exposes run and discovery controls", async () => {
   assert.match(html, /id="discover-button"/);
   assert.match(html, /Discover queries/);
   assert.match(html, /id="results"/);
+  assert.match(html, /<select id="market"/);
+  assert.match(html, /<select id="language"/);
   assert.match(html, /Torque Partnership/);
   assert.match(html, /Turning Digital/);
 });

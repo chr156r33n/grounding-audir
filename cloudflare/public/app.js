@@ -88,7 +88,7 @@ $("#discover-button").addEventListener("click", async () => {
       .join("");
     $("#candidate-list").innerHTML = result.candidates
       .map(
-        (candidate, index) => `
+        (candidate) => `
           <div class="candidate">
             <span>${escapeHtml(candidate.query)}</span>
             <button type="button" data-query="${encodeURIComponent(candidate.query)}">Use</button>
@@ -132,9 +132,25 @@ function renderResults(result) {
         </article>`,
     )
     .join("");
-  $("#run-details").innerHTML = result.runs.map(renderRun).join("");
+  $("#run-details").innerHTML = result.runs.map((run, index) => renderRun(run, index)).join("");
+  bindLazyRawResponses(result.runs);
   results.hidden = false;
-  results.scrollIntoView({ behavior: "smooth", block: "start" });
+  results.scrollIntoView({ block: "start" });
+}
+
+function bindLazyRawResponses(runs) {
+  document.querySelectorAll(".raw-block").forEach((block) => {
+    block.addEventListener("toggle", () => {
+      if (!block.open) return;
+      const pre = block.querySelector(".raw-pre");
+      if (!pre || pre.dataset.loaded === "true") return;
+      const index = Number(pre.dataset.runIndex);
+      const run = runs[index];
+      if (!run?.rawResponse) return;
+      pre.textContent = JSON.stringify(run.rawResponse, null, 2);
+      pre.dataset.loaded = "true";
+    });
+  });
 }
 
 function renderSourceSection(title, caption, sources, emptyMessage) {
@@ -164,7 +180,7 @@ function formatGeneratedQueryItem(item) {
   return "";
 }
 
-function renderRun(run) {
+function renderRun(run, index) {
   const openedPages = (run.sources || []).filter((source) => source.sourceOrigin === "open_page");
   const listedSources = (run.sources || []).filter(
     (source) => source.sourceOrigin !== "open_page",
@@ -196,7 +212,7 @@ function renderRun(run) {
         .join("")}</div></div>`
     : "";
   const raw = run.rawResponse
-    ? `<div><h4>Raw response</h4><pre>${escapeHtml(JSON.stringify(run.rawResponse, null, 2))}</pre></div>`
+    ? `<details class="raw-block"><summary>Show sanitised raw response</summary><pre class="raw-pre" data-run-index="${index}">Open to load response JSON…</pre></details>`
     : "";
   return `
     <details>
@@ -229,9 +245,11 @@ function renderRun(run) {
 }
 
 function escapeHtml(value) {
-  const node = document.createElement("div");
-  node.textContent = String(value ?? "");
-  return node.innerHTML;
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function escapeAttribute(value) {

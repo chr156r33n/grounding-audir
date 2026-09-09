@@ -7,6 +7,15 @@ test("edge UI exposes run and discovery controls", async () => {
   assert.match(html, /id="run-form"/);
   assert.match(html, /id="discover-button"/);
   assert.match(html, /id="results"/);
+  assert.match(html, /Torque Partnership/);
+  assert.match(html, /Turning Digital/);
+});
+
+test("client avoids eager raw response rendering", async () => {
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(script, /bindLazyRawResponses/);
+  assert.match(script, /JSON\.stringify\(run\.rawResponse/);
+  assert.doesNotMatch(script, /JSON\.stringify\(run\.rawResponse, null, 2\)\}\)<\/pre>/);
 });
 
 test("client calls only same-origin API routes", async () => {

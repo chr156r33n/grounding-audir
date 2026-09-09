@@ -84,10 +84,10 @@ $("#discover-button").addEventListener("click", async () => {
         count: 6,
       }),
     });
-    $("#term-list").innerHTML = result.keyTerms
+    $("#term-list").innerHTML = (result.keyTerms || [])
       .map((term) => `<span class="term">${escapeHtml(term)}</span>`)
       .join("");
-    $("#candidate-list").innerHTML = result.candidates
+    $("#candidate-list").innerHTML = (result.candidates || [])
       .map(
         (candidate) => `
           <div class="candidate">

@@ -27,6 +27,14 @@ test("styles use Torque blue palette not orange accents", async () => {
   assert.doesNotMatch(css, /#e8622a|orange/i);
 });
 
+test("client supports multi-phrase runs and candidate toggles", async () => {
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(script, /function splitInputPhrases/);
+  assert.match(script, /function toggleCandidateQuery/);
+  assert.match(script, /selectedCandidateQueries/);
+  assert.match(script, /result\.batches/);
+});
+
 test("client calls only same-origin API routes", async () => {
   const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   assert.match(script, /api\("\/api\/config"/);

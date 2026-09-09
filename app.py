@@ -12,6 +12,7 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
+from core.phrases import split_input_phrases
 from core.query_discovery import QueryDiscoveryResult, discover_queries
 from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
@@ -135,9 +136,11 @@ def _render_debug_panel(run: GroundingRun, *, expanded: bool = False) -> None:
 def _configuration_form():
     with st.form("grounding-run-form"):
         st.subheader("Test configuration")
-        query = st.text_input(
+        query = st.text_area(
             "Grounding/search phrase",
-            placeholder="best luxury family hotels in Hong Kong",
+            placeholder="One phrase per line, or comma-separated",
+            help="Enter one or more phrases separated by new lines or commas. Select multiple discovered queries with Use to add them here.",
+            height=100,
             key="input_query",
         )
         discovery_url = st.text_input(
@@ -281,6 +284,9 @@ def _start_query_discovery(
         st.error(str(exc))
         return None
     st.session_state["query_discovery"] = discovery
+    st.session_state["selected_discovery_queries"] = []
+    for index in range(len(discovery.candidates)):
+        st.session_state.pop(f"discover_pick_{index}", None)
     st.session_state["grounding_runs"] = []
     st.session_state.pop("grounding_request", None)
     if discovery.candidates:
@@ -302,61 +308,76 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         st.error("Select at least one provider.")
         return
 
-    query = values["query"].strip()
+    phrases = split_input_phrases(values["query"])
     if values["discovery_url"] or values.get("discovery_paste"):
         discovery = _start_query_discovery(values, configs)
-        if discovery and discovery.candidates and not query:
-            query = discovery.candidates[0].query
-            st.session_state["input_query"] = query
-        if not query:
+        if discovery and discovery.candidates and not phrases:
+            phrases = [discovery.candidates[0].query]
+            st.session_state["input_query"] = phrases[0]
+        if not phrases:
             st.error(
                 "Enter a grounding/search phrase, or provide page content that yields "
                 "query suggestions."
             )
             return
-    elif not query:
+    elif not phrases:
         st.error("Enter a grounding/search phrase.")
         return
 
-    request = GroundingRequest(
-        run_id=str(uuid4()),
-        input_phrase=query,
-        targets=[Target(values["target"].strip(), values["match_mode"])],
-        market=values["market"],
-        language=values["language"],
-        provider_options={
-            "timeout_seconds": values["timeout_seconds"],
-            "debug_mode": values["debug_mode"],
-        },
-    )
-    jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
-    st.session_state["grounding_request"] = request
-    st.session_state["grounding_runs"] = []
-
+    all_runs: list[GroundingRun] = []
+    last_request: GroundingRequest | None = None
     st.subheader("Running test")
-
-    statuses = {
-        provider_id: st.empty()
-        for provider_id in selected
-    }
-    for provider_id in selected:
-        statuses[provider_id].info(f"⟳ {PROVIDERS[provider_id].name} — running")
+    statuses = {provider_id: st.empty() for provider_id in selected}
     matrix_placeholder = st.empty()
-    completed: dict[str, GroundingRun] = {}
-    for run in execute_providers(request, jobs):
-        completed[run.provider_id] = run
-        if run.status.value == "complete":
-            statuses[run.provider_id].success(
-                f"✓ {run.provider_name} — {((run.latency_ms or 0) / 1000):.1f}s"
-            )
-        else:
-            message = run.error.safe_message if run.error else run.status.value
-            statuses[run.provider_id].error(f"{run.provider_name} — {message}")
+
+    for phrase_index, phrase in enumerate(phrases):
+        if len(phrases) > 1:
+            st.markdown(f"**Phrase {phrase_index + 1} of {len(phrases)}:** `{phrase}`")
+        request = GroundingRequest(
+            run_id=str(uuid4()),
+            input_phrase=phrase,
+            targets=[Target(values["target"].strip(), values["match_mode"])],
+            market=values["market"],
+            language=values["language"],
+            provider_options={
+                "timeout_seconds": values["timeout_seconds"],
+                "debug_mode": values["debug_mode"],
+            },
+            queries=[phrase],
+        )
+        last_request = request
+        jobs = [(PROVIDERS[provider_id], configs[provider_id]) for provider_id in selected]
+        completed: dict[str, GroundingRun] = {}
+        for provider_id in selected:
+            statuses[provider_id].info(f"⟳ {PROVIDERS[provider_id].name} — running `{phrase}`")
+        for run in execute_providers(request, jobs):
+            completed[run.provider_id] = run
+            all_runs.append(run)
+            if run.status.value == "complete":
+                statuses[run.provider_id].success(
+                    f"✓ {run.provider_name} — {((run.latency_ms or 0) / 1000):.1f}s · `{phrase}`"
+                )
+            else:
+                message = run.error.safe_message if run.error else run.status.value
+                statuses[run.provider_id].error(f"{run.provider_name} — {message} · `{phrase}`")
         ordered = [completed[item] for item in selected if item in completed]
         matrix_placeholder.dataframe(_matrix_data(ordered), use_container_width=True, hide_index=True)
-    st.session_state["grounding_runs"] = [
-        completed[item] for item in selected if item in completed
-    ]
+
+    st.session_state["grounding_request"] = last_request
+    st.session_state["grounding_runs"] = all_runs
+    st.session_state["grounding_phrases"] = phrases
+
+
+def _sync_selected_discovery_queries() -> None:
+    discovery = st.session_state.get("query_discovery")
+    if not discovery:
+        return
+    selected: list[str] = []
+    for index, item in enumerate(discovery.candidates):
+        if st.session_state.get(f"discover_pick_{index}", False):
+            selected.append(item.query)
+    st.session_state["selected_discovery_queries"] = selected
+    st.session_state["input_query"] = "\n".join(selected)
 
 
 def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None:
@@ -366,21 +387,38 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     discovery = st.session_state.get("query_discovery")
     if discovery:
         _render_query_discovery(discovery)
+    phrases = st.session_state.get("grounding_phrases") or sorted({run.input_phrase for run in runs})
     st.subheader(f"Target citation summary — {request.targets[0].value}")
-    columns = st.columns(min(4, len(runs)))
-    for index, run in enumerate(runs):
-        with columns[index % len(columns)]:
-            st.metric(run.provider_name, STATE_LABELS[run.target_cited])
+    if len(phrases) > 1:
+        for phrase in phrases:
+            phrase_runs = [run for run in runs if run.input_phrase == phrase]
+            st.markdown(f"**Phrase:** `{phrase}`")
+            columns = st.columns(min(4, len(phrase_runs)))
+            for index, run in enumerate(phrase_runs):
+                with columns[index % len(columns)]:
+                    st.metric(run.provider_name, STATE_LABELS[run.target_cited])
+            st.markdown("**Comparison matrix**")
+            st.dataframe(_matrix_data(phrase_runs), use_container_width=True, hide_index=True)
+            st.markdown("**Provider evidence**")
+            debug_mode = _debug_mode_enabled(request)
+            for run in phrase_runs:
+                _provider_details(run, debug_mode=debug_mode)
+    else:
+        st.subheader(f"Target citation summary — {request.targets[0].value}")
+        columns = st.columns(min(4, len(runs)))
+        for index, run in enumerate(runs):
+            with columns[index % len(columns)]:
+                st.metric(run.provider_name, STATE_LABELS[run.target_cited])
 
-    st.subheader("Comparison matrix")
-    st.dataframe(_matrix_data(runs), use_container_width=True, hide_index=True)
+        st.subheader("Comparison matrix")
+        st.dataframe(_matrix_data(runs), use_container_width=True, hide_index=True)
 
-    st.subheader("Provider evidence")
-    debug_mode = _debug_mode_enabled(request)
-    if debug_mode:
-        st.caption("Debug mode is on — each provider includes an expanded debug trace.")
-    for run in runs:
-        _provider_details(run, debug_mode=debug_mode)
+        st.subheader("Provider evidence")
+        debug_mode = _debug_mode_enabled(request)
+        if debug_mode:
+            st.caption("Debug mode is on — each provider includes an expanded debug trace.")
+        for run in runs:
+            _provider_details(run, debug_mode=debug_mode)
 
     st.subheader("Export")
     include_raw = st.checkbox("Include sanitised raw provider responses in JSON")
@@ -401,10 +439,6 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
             mime="text/csv",
             use_container_width=True,
         )
-
-
-def _use_discovered_query(query: str) -> None:
-    st.session_state["input_query"] = query
 
 
 def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
@@ -439,19 +473,17 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             use_container_width=True,
         )
         st.caption(
-            "Suggestions are hypotheses, not ranking guarantees. Choose one to place it "
-            "in the query field, then run the test again."
+            "Use toggles selection. Selected queries are added to the search phrase box, "
+            "one per line. Run the test to check every line or comma-separated phrase."
         )
-        button_columns = st.columns(2)
         for index, item in enumerate(discovery.candidates):
-            with button_columns[index % 2]:
-                st.button(
-                    f"Use query {index + 1}: {item.query}",
-                    key=f"use_discovered_{index}_{hash(item.query)}",
-                    on_click=_use_discovered_query,
-                    args=(item.query,),
-                    use_container_width=True,
-                )
+            st.checkbox(
+                item.query,
+                key=f"discover_pick_{index}",
+                on_change=_sync_selected_discovery_queries,
+            )
+            if item.rationale:
+                st.caption(item.rationale)
 
     with st.expander("Page evidence"):
         if not discovery.evidence:

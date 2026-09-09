@@ -48,7 +48,8 @@
           </label>
           <label>
             <span>Grounding / search phrase</span>
-            <textarea id="query" required rows="3" placeholder="best luxury family hotels in Hong Kong"></textarea>
+            <textarea id="query" required rows="3" placeholder="One phrase per line, or comma-separated"></textarea>
+            <small class="field-help">Select multiple discovered queries with Use, or enter several phrases separated by new lines or commas.</small>
           </label>
           <div class="field-grid">
             <label>
@@ -107,7 +108,7 @@
           <div id="discovery-results" hidden>
             <p class="micro-label">Distinctive terms</p>
             <div id="term-list" class="term-list"></div>
-            <p class="micro-label">Candidate queries</p>
+            <p class="micro-label">Candidate queries <small class="muted">Use toggles selection; selected phrases are added one per line</small></p>
             <div id="candidate-list" class="candidate-list"></div>
           </div>
         </aside>

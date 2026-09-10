@@ -114,6 +114,10 @@ function validateRun(body: Partial<RunRequest>): RunRequest {
     target: target.slice(0, 2_000),
     matchMode,
     brandRegex: brandRegex || undefined,
+    resolveCitationRedirects:
+      body.resolveCitationRedirects === undefined
+        ? undefined
+        : !!body.resolveCitationRedirects,
     market: String(body.market || "").trim().slice(0, 20) || undefined,
     language: String(body.language || "").trim().slice(0, 20) || undefined,
     providers,

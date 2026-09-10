@@ -11,6 +11,7 @@ test("edge UI exposes run and discovery controls", async () => {
   assert.match(html, /<select id="market"/);
   assert.match(html, /<select id="language"/);
   assert.match(html, /id="brand-regex"/);
+  assert.match(html, /id="resolve-redirects"/);
   assert.match(html, /Torque Partnership/);
   assert.match(html, /Turning Digital/);
 });

@@ -207,6 +207,14 @@ def _configuration_form():
                 "responses for every provider run. Secrets are still redacted."
             ),
         )
+        resolve_citation_redirects = st.checkbox(
+            "Resolve Gemini citation redirects",
+            value=match_label == "URL prefix",
+            help=(
+                "Follow Gemini grounding redirect links to obtain the final cited URL. "
+                "Recommended for URL prefix matching when annotation titles only show a domain."
+            ),
+        )
 
         st.subheader("Providers")
         selected: list[str] = []
@@ -247,6 +255,7 @@ def _configuration_form():
         "language": LANGUAGES[language_label],
         "timeout_seconds": timeout_seconds,
         "debug_mode": debug_mode,
+        "resolve_citation_redirects": resolve_citation_redirects,
         "discovery_url": discovery_url.strip(),
         "discovery_paste": discovery_paste.strip(),
         "discovery_fetch_profile": discovery_fetch_profile,
@@ -342,6 +351,7 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
             provider_options={
                 "timeout_seconds": values["timeout_seconds"],
                 "debug_mode": values["debug_mode"],
+                "resolve_citation_redirects": values["resolve_citation_redirects"],
             },
             queries=[phrase],
         )
@@ -769,11 +779,13 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
                 [
                     {
                         "URL": item.url,
+                        "Resolved URL": item.metadata.get("resolved_url"),
                         "Title": item.title,
                         "Start": item.start_index,
                         "End": item.end_index,
                         "Cited text": item.cited_text,
                         "Target match": bool(item.target_matches),
+                        "Redirect resolution": item.metadata.get("redirect_resolution"),
                     }
                     for item in run.citations
                 ],

@@ -100,6 +100,12 @@
             <span class="toggle-ui"></span>
             Include sanitised raw responses
           </label>
+          <label class="toggle" id="resolve-redirects-field">
+            <input id="resolve-redirects" type="checkbox" checked />
+            <span class="toggle-ui"></span>
+            Resolve Gemini citation redirects
+            <small class="field-help">Follow grounding redirect links to match URL prefixes. Enabled by default for URL prefix mode.</small>
+          </label>
           <button id="run-button" class="primary" type="submit">
             <span>Run observatory</span><span aria-hidden="true">↗</span>
           </button>

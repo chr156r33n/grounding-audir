@@ -32,6 +32,7 @@ export interface RunRequest {
   target: string;
   matchMode: "root_domain" | "exact_hostname" | "url_prefix";
   brandRegex?: string;
+  resolveCitationRedirects?: boolean;
   market?: string;
   language?: string;
   providers: ProviderId[];
@@ -43,6 +44,9 @@ export interface Citation {
   title?: string;
   citedText?: string;
   targetMatch: boolean;
+  resolvedUrl?: string;
+  redirectResolution?: "resolved" | "failed" | "skipped";
+  redirectResolutionError?: string;
 }
 
 export interface GeneratedQuery {

@@ -9,16 +9,15 @@ import type {
 } from "./types.ts";
 import {
   appendOrMergeCitation,
+  citationMatchFields,
   parseHtmlLinkCitations,
   parseMarkdownLinkCitations,
-  targetMatchesCitation,
 } from "./citations.ts";
 import {
-  enrichCitationsWithRedirectResolution,
-  geminiTargetCited,
-} from "./citation-redirects.ts";
-import { getDomain } from "tldts";
-
+  applyPropertyResults,
+  targetMatchFields,
+} from "./targets.ts";
+import { enrichCitationsWithRedirectResolution } from "./citation-redirects.ts";
 const NAMES: Record<ProviderId, string> = {
   openai_web: "OpenAI Web Search",
   deepseek_web: "DeepSeek Web Search",
@@ -106,6 +105,7 @@ export async function runProvider(
       searchPerformed: "UNKNOWN",
       targetRetrieved: "UNKNOWN",
       targetCited: id === "microsoft_web_iq" ? "N/A" : "UNKNOWN",
+      propertyResults: [],
       generatedQueries: [],
       sources: [],
       citations: [],
@@ -269,10 +269,9 @@ function parseResponses(
             url,
             title: stringValue(annotation.title || annotation.name),
             citedText: sliceText(text, annotation.start_index, annotation.end_index),
-            targetMatch: targetMatchesCitation(
+            ...citationMatchFields(
               request,
               url,
-              targetMatches,
               stringValue(annotation.title || annotation.name),
               sliceText(text, annotation.start_index, annotation.end_index),
             ),
@@ -283,30 +282,21 @@ function parseResponses(
   }
   const responseText = textParts.join("\n") || stringValue(payload.output_text);
   if (!citations.length && responseText) {
-    citations.push(...parseMarkdownLinkCitations(responseText, request, targetMatches));
+    citations.push(...parseMarkdownLinkCitations(responseText, request));
   }
   for (const source of sources) {
     if (citations.some((citation) => citation.url === source.url)) source.cited = "YES";
   }
-  return {
+  const run: ProviderRun = {
     providerId: id,
     providerName: NAMES[id],
     model,
     status: "complete",
     latencyMs,
     searchPerformed: searchCalls ? "YES" : output.length ? "NO" : "UNKNOWN",
-    targetRetrieved: sources.length
-      ? sources.some((source) => source.targetMatch)
-        ? "YES"
-        : "NO"
-      : sourcesObservable
-        ? "NO"
-        : "UNKNOWN",
-    targetCited: citations.some((citation) => citation.targetMatch)
-      ? "YES"
-      : anchorReferences
-        ? "UNKNOWN"
-        : "NO",
+    targetRetrieved: "UNKNOWN",
+    targetCited: "UNKNOWN",
+    propertyResults: [],
     generatedQueries,
     sources,
     citations,
@@ -322,6 +312,10 @@ function parseResponses(
     },
     ...(request.debug ? { rawResponse: raw } : {}),
   };
+  return applyPropertyResults(run, request, {
+    retrievalComplete: sources.length > 0 || sourcesObservable,
+    citationComplete: !anchorReferences,
+  });
 }
 
 async function parseGemini(
@@ -358,7 +352,7 @@ async function parseGemini(
         if (!isRecord(result)) continue;
         const markup = stringValue(result.search_suggestions);
         if (!markup) continue;
-        for (const citation of parseHtmlLinkCitations(markup, request, targetMatches)) {
+        for (const citation of parseHtmlLinkCitations(markup, request)) {
           pushCitation(citation);
         }
       }
@@ -378,24 +372,24 @@ async function parseGemini(
           url,
           title,
           citedText,
-          targetMatch: targetMatchesCitation(request, url, targetMatches, title, citedText),
+          ...citationMatchFields(request, url, title, citedText),
         });
       }
     }
   }
   const responseText = textParts.join("\n") || stringValue(payload.output_text);
   if (responseText) {
-    for (const citation of parseHtmlLinkCitations(responseText, request, targetMatches)) {
+    for (const citation of parseHtmlLinkCitations(responseText, request)) {
       pushCitation(citation);
     }
     if (!citations.length) {
-      for (const citation of parseMarkdownLinkCitations(responseText, request, targetMatches)) {
+      for (const citation of parseMarkdownLinkCitations(responseText, request)) {
         pushCitation(citation);
       }
     }
   }
-  await enrichCitationsWithRedirectResolution(citations, request, targetMatches);
-  return {
+  await enrichCitationsWithRedirectResolution(citations, request);
+  const run: ProviderRun = {
     providerId: "gemini",
     providerName: NAMES.gemini,
     model,
@@ -403,7 +397,8 @@ async function parseGemini(
     latencyMs,
     searchPerformed: searchCalls ? "YES" : steps.length ? "NO" : "UNKNOWN",
     targetRetrieved: "UNKNOWN",
-    targetCited: geminiTargetCited(citations, request),
+    targetCited: "UNKNOWN",
+    propertyResults: [],
     generatedQueries,
     sources: [],
     citations,
@@ -411,6 +406,7 @@ async function parseGemini(
     metadata: { interactionId: payload.id, actualModel: payload.model, usage: payload.usage },
     ...(request.debug ? { rawResponse: raw } : {}),
   };
+  return applyPropertyResults(run, request, { retrievalComplete: false });
 }
 
 function parseWebIq(
@@ -434,47 +430,36 @@ function parseWebIq(
       title: stringValue(item.title),
       snippet: stringValue(item.content)?.slice(0, 240),
       position: index + 1,
-      targetMatch: targetMatches(request, url),
+      ...targetMatchFields(request, url),
       cited: "N/A",
     }];
   });
-  return {
+  const run: ProviderRun = {
     providerId: "microsoft_web_iq",
     providerName: NAMES.microsoft_web_iq,
     model,
     status: "complete",
     latencyMs,
     searchPerformed: items.length ? "YES" : "NO",
-    targetRetrieved: sources.some((source) => source.targetMatch) ? "YES" : "NO",
+    targetRetrieved: "UNKNOWN",
     targetCited: "N/A",
+    propertyResults: [],
     generatedQueries: [{ query: request.query, actionType: "input" }],
     sources,
     citations: [],
     metadata: { resultCount: sources.length },
     ...(request.debug ? { rawResponse: raw } : {}),
   };
-}
-
-function targetMatches(request: RunRequest, candidate: string) {
-  try {
-    const candidateUrl = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    const targetUrl = new URL(
-      request.target.includes("://") ? request.target : `https://${request.target}`,
-    );
-    if (request.matchMode === "exact_hostname") {
-      return candidateUrl.hostname.toLowerCase() === targetUrl.hostname.toLowerCase();
-    }
-    if (request.matchMode === "url_prefix") {
-      return (
-        candidateUrl.origin === targetUrl.origin &&
-        (candidateUrl.pathname === targetUrl.pathname ||
-          candidateUrl.pathname.startsWith(`${targetUrl.pathname.replace(/\/$/, "")}/`))
-      );
-    }
-    return rootDomain(candidateUrl.hostname) === rootDomain(targetUrl.hostname);
-  } catch {
-    return false;
-  }
+  const withProperties = applyPropertyResults(run, request, {
+    retrievalComplete: true,
+    citationComplete: false,
+  });
+  withProperties.targetCited = "N/A";
+  withProperties.propertyResults = withProperties.propertyResults.map((item) => ({
+    ...item,
+    cited: "N/A",
+  }));
+  return withProperties;
 }
 
 function recordUrl(record: Record<string, unknown>) {
@@ -605,7 +590,7 @@ function appendSource(
     title: stringValue(record.title || record.name),
     snippet: stringValue(record.snippet || record.description),
     position: sources.length + 1,
-    targetMatch: targetMatches(request, url),
+    ...targetMatchFields(request, url),
     cited: "NO",
     sourceOrigin: origin,
     callStatus,
@@ -633,11 +618,6 @@ function marketLocale(request: RunRequest) {
     language: request.language || parts[0] || undefined,
     region: parts.at(-1)?.length === 2 ? parts.at(-1)?.toUpperCase() : undefined,
   };
-}
-
-function rootDomain(hostname: string) {
-  const normalized = hostname.toLowerCase().replace(/\.$/, "");
-  return getDomain(normalized, { allowPrivateDomains: true }) || normalized;
 }
 
 function modelFor(id: ProviderId, env: Env) {

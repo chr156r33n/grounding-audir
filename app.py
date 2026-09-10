@@ -6,17 +6,17 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from core.enums import MatchMode, ObservationState
+from core.enums import MatchMode, ObservationState, TargetCategory
 from core.execution import execute_providers
 from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
-from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
 from core.phrases import split_input_phrases
 from core.query_discovery import QueryDiscoveryResult, discover_queries
 from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
+from core.targets import CATEGORY_LABELS, MAX_MONITOR_PROPERTIES, display_label, validate_targets
 from providers.registry import PROVIDERS
 from providers.responses_parsing import extract_query_text
 
@@ -32,6 +32,11 @@ MATCH_LABELS = {
     "Root domain": MatchMode.ROOT_DOMAIN,
     "Exact hostname": MatchMode.EXACT_HOSTNAME,
     "URL prefix": MatchMode.URL_PREFIX,
+}
+CATEGORY_OPTIONS = {
+    "Owned": TargetCategory.OWNED,
+    "Of interest": TargetCategory.OF_INTEREST,
+    "Competition": TargetCategory.COMPETITION,
 }
 MARKETS = {
     "United Kingdom (en-GB)": "en-GB",
@@ -180,13 +185,62 @@ def _configuration_form():
             value=6,
             help="Maximum number of merged suggestions to keep across Gemini and OpenAI.",
         )
-        target = st.text_input("Target domain, hostname, or URL prefix", placeholder="fourseasons.com")
-        col1, col2, col3 = st.columns(3)
+        property_count = st.number_input(
+            "Number of properties",
+            min_value=1,
+            max_value=MAX_MONITOR_PROPERTIES,
+            value=1,
+            step=1,
+            help="Monitor up to five URLs or domains, each tagged owned, of interest, or competition.",
+        )
+        targets: list[Target] = []
+        for index in range(int(property_count)):
+            st.markdown(f"**Property {index + 1}**")
+            cols = st.columns([2, 1, 1])
+            with cols[0]:
+                prop_value = st.text_input(
+                    "URL or domain",
+                    key=f"prop_value_{index}",
+                    placeholder="fourseasons.com",
+                )
+            with cols[1]:
+                prop_category = st.selectbox(
+                    "Category",
+                    list(CATEGORY_OPTIONS),
+                    key=f"prop_category_{index}",
+                )
+            with cols[2]:
+                prop_match = st.selectbox(
+                    "Match mode",
+                    list(MATCH_LABELS),
+                    key=f"prop_match_{index}",
+                )
+            detail_cols = st.columns(2)
+            with detail_cols[0]:
+                prop_label = st.text_input(
+                    "Label (optional)",
+                    key=f"prop_label_{index}",
+                    placeholder="Four Seasons",
+                )
+            with detail_cols[1]:
+                prop_brand = st.text_input(
+                    "Brand regex (optional)",
+                    key=f"prop_brand_{index}",
+                    placeholder=r"\bFour Seasons\b",
+                )
+            targets.append(
+                Target(
+                    value=prop_value.strip(),
+                    match_mode=MATCH_LABELS[prop_match],
+                    label=prop_label.strip(),
+                    category=CATEGORY_OPTIONS[prop_category],
+                    brand_regex=prop_brand.strip(),
+                )
+            )
+        col1, col2 = st.columns(2)
         with col1:
-            match_label = st.radio("Match mode", list(MATCH_LABELS), horizontal=False)
-        with col2:
             market_label = st.selectbox("Country / market", list(MARKETS))
-        with col3:
+        with col2:
             language_label = st.selectbox("Language", list(LANGUAGES))
         timeout_seconds = st.slider(
             "Per-provider timeout (seconds)",
@@ -209,7 +263,7 @@ def _configuration_form():
         )
         resolve_citation_redirects = st.checkbox(
             "Resolve Gemini citation redirects",
-            value=match_label == "URL prefix",
+            value=any(target.match_mode is MatchMode.URL_PREFIX for target in targets),
             help=(
                 "Follow Gemini grounding redirect links to obtain the final cited URL. "
                 "Recommended for URL prefix matching when annotation titles only show a domain."
@@ -249,8 +303,7 @@ def _configuration_form():
             )
     values = {
         "query": query,
-        "target": target,
-        "match_mode": MATCH_LABELS[match_label],
+        "targets": targets,
         "market": MARKETS[market_label],
         "language": LANGUAGES[language_label],
         "timeout_seconds": timeout_seconds,
@@ -310,8 +363,10 @@ def _start_query_discovery(
 
 
 def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) -> None:
-    if not values["target"].strip() or not normalize_url(values["target"]):
-        st.error("Enter a valid target domain, hostname, or HTTP(S) URL.")
+    try:
+        targets = validate_targets(values["targets"])
+    except ValueError as exc:
+        st.error(str(exc))
         return
     if not selected:
         st.error("Select at least one provider.")
@@ -345,7 +400,7 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
         request = GroundingRequest(
             run_id=str(uuid4()),
             input_phrase=phrase,
-            targets=[Target(values["target"].strip(), values["match_mode"])],
+            targets=targets,
             market=values["market"],
             language=values["language"],
             provider_options={
@@ -371,7 +426,11 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
                 message = run.error.safe_message if run.error else run.status.value
                 statuses[run.provider_id].error(f"{run.provider_name} — {message} · `{phrase}`")
         ordered = [completed[item] for item in selected if item in completed]
-        matrix_placeholder.dataframe(_matrix_data(ordered), use_container_width=True, hide_index=True)
+        matrix_placeholder.dataframe(
+            _property_matrix_data(ordered, targets),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     st.session_state["grounding_request"] = last_request
     st.session_state["grounding_runs"] = all_runs
@@ -398,29 +457,34 @@ def _render_results(request: GroundingRequest, runs: list[GroundingRun]) -> None
     if discovery:
         _render_query_discovery(discovery)
     phrases = st.session_state.get("grounding_phrases") or sorted({run.input_phrase for run in runs})
-    st.subheader(f"Target citation summary — {request.targets[0].value}")
+    st.subheader("Property comparison matrix")
+    st.caption(
+        "Each row is a monitored property. Columns show retrieved, cited, and brand mention "
+        "states per provider. UNKNOWN is not NO."
+    )
     if len(phrases) > 1:
         for phrase in phrases:
             phrase_runs = [run for run in runs if run.input_phrase == phrase]
             st.markdown(f"**Phrase:** `{phrase}`")
-            columns = st.columns(min(4, len(phrase_runs)))
-            for index, run in enumerate(phrase_runs):
-                with columns[index % len(columns)]:
-                    st.metric(run.provider_name, STATE_LABELS[run.target_cited])
-            st.markdown("**Comparison matrix**")
+            st.dataframe(
+                _property_matrix_data(phrase_runs, request.targets),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.markdown("**Provider overview**")
             st.dataframe(_matrix_data(phrase_runs), use_container_width=True, hide_index=True)
             st.markdown("**Provider evidence**")
             debug_mode = _debug_mode_enabled(request)
             for run in phrase_runs:
                 _provider_details(run, debug_mode=debug_mode)
     else:
-        st.subheader(f"Target citation summary — {request.targets[0].value}")
-        columns = st.columns(min(4, len(runs)))
-        for index, run in enumerate(runs):
-            with columns[index % len(columns)]:
-                st.metric(run.provider_name, STATE_LABELS[run.target_cited])
+        st.dataframe(
+            _property_matrix_data(runs, request.targets),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        st.subheader("Comparison matrix")
+        st.subheader("Provider overview")
         st.dataframe(_matrix_data(runs), use_container_width=True, hide_index=True)
 
         st.subheader("Provider evidence")
@@ -597,6 +661,33 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             )
 
 
+def _property_result_for(run: GroundingRun, target_value: str) -> dict[str, object] | None:
+    props = run.metadata.get("property_results") or []
+    return next((item for item in props if item.get("value") == target_value), None)
+
+
+def _property_matrix_data(runs: list[GroundingRun], targets: list[Target]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for target in targets:
+        row: dict[str, object] = {
+            "Property": display_label(target),
+            "Category": CATEGORY_LABELS[target.category],
+        }
+        for run in runs:
+            prefix = run.provider_name
+            match = _property_result_for(run, target.value)
+            if match:
+                row[f"{prefix} · retrieved"] = str(match.get("retrieved", "?")).upper()
+                row[f"{prefix} · cited"] = str(match.get("cited", "?")).upper()
+                row[f"{prefix} · brand"] = str(match.get("brandMentioned", "?")).upper()
+            else:
+                row[f"{prefix} · retrieved"] = STATE_LABELS[run.target_retrieved]
+                row[f"{prefix} · cited"] = STATE_LABELS[run.target_cited]
+                row[f"{prefix} · brand"] = "N/A"
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _matrix_data(runs: list[GroundingRun]) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -636,7 +727,7 @@ def _source_table_rows(sources):
             "URL": item.raw_url,
             "Title": item.title,
             "Call status": item.metadata.get("call_status"),
-            "Target match": bool(item.target_matches),
+            "Properties matched": ", ".join(item.target_matches) or "—",
             "Retrieved": STATE_LABELS[item.retrieved],
             "Cited in answer": STATE_LABELS[item.cited],
         }
@@ -657,6 +748,26 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
             "target_cited": STATE_LABELS[run.target_cited],
         }
         st.write(summary)
+        property_rows = run.metadata.get("property_results") or []
+        if property_rows:
+            st.markdown("#### Property results")
+            st.dataframe(
+                [
+                    {
+                        "Property": item.get("label") or item.get("value"),
+                        "Category": CATEGORY_LABELS.get(
+                            TargetCategory(str(item.get("category", TargetCategory.OWNED.value))),
+                            str(item.get("category", "")),
+                        ),
+                        "Retrieved": str(item.get("retrieved", "?")).upper(),
+                        "Cited": str(item.get("cited", "?")).upper(),
+                        "Brand": str(item.get("brandMentioned", "?")).upper(),
+                    }
+                    for item in property_rows
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
         if run.error:
             st.error(run.error.safe_message)
             error_details = run.metadata.get("error_details")
@@ -784,7 +895,7 @@ def _provider_details(run: GroundingRun, *, debug_mode: bool = False) -> None:
                         "Start": item.start_index,
                         "End": item.end_index,
                         "Cited text": item.cited_text,
-                        "Target match": bool(item.target_matches),
+                        "Properties matched": ", ".join(item.target_matches) or "—",
                         "Redirect resolution": item.metadata.get("redirect_resolution"),
                     }
                     for item in run.citations

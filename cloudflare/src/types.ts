@@ -1,3 +1,23 @@
+export type TargetCategory = "owned" | "of_interest" | "competition";
+
+export interface MonitorTarget {
+  value: string;
+  matchMode: "root_domain" | "exact_hostname" | "url_prefix";
+  label?: string;
+  category: TargetCategory;
+  brandRegex?: string;
+}
+
+export interface PropertyResult {
+  value: string;
+  label: string;
+  category: TargetCategory;
+  retrieved: ObservationState;
+  cited: ObservationState;
+  brandMentioned: ObservationState;
+  brandMatches: string[];
+}
+
 export interface Env {
   ASSETS: Fetcher;
   OBSERVATORY_ACCESS_KEY?: string;
@@ -29,8 +49,10 @@ export type ObservationState = "YES" | "NO" | "UNKNOWN" | "N/A";
 
 export interface RunRequest {
   query: string;
-  target: string;
-  matchMode: "root_domain" | "exact_hostname" | "url_prefix";
+  targets: MonitorTarget[];
+  /** @deprecated Legacy single-target field retained for API compatibility */
+  target?: string;
+  matchMode?: "root_domain" | "exact_hostname" | "url_prefix";
   brandRegex?: string;
   resolveCitationRedirects?: boolean;
   market?: string;
@@ -44,6 +66,7 @@ export interface Citation {
   title?: string;
   citedText?: string;
   targetMatch: boolean;
+  targetMatches: string[];
   resolvedUrl?: string;
   redirectResolution?: "resolved" | "failed" | "skipped";
   redirectResolutionError?: string;
@@ -61,6 +84,7 @@ export interface Source {
   snippet?: string;
   position?: number;
   targetMatch: boolean;
+  targetMatches: string[];
   cited: ObservationState;
   sourceOrigin?: "open_page" | "source_list" | "action";
   callStatus?: string;
@@ -78,6 +102,7 @@ export interface ProviderRun {
   targetCited: ObservationState;
   brandMentioned?: ObservationState;
   brandMatches?: string[];
+  propertyResults: PropertyResult[];
   generatedQueries: GeneratedQuery[];
   sources: Source[];
   citations: Citation[];

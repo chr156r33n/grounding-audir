@@ -9,6 +9,7 @@ from core.citation_redirects import (
 )
 from core.enums import ObservationState
 from core.models import GeneratedQuery, GroundingRequest, ProviderCapabilities, ProviderField, utc_now
+from core.targets import compute_property_results, property_results_to_dict
 
 from core.debug import (
     DebugTrace,
@@ -185,8 +186,15 @@ class GeminiProvider(GroundingProvider):
                 "retrieved-source list; citations must not be treated as retrieval."
             ),
         }
-        run = self.finish_states(run, retrieval_complete=False)
+        run = self.finish_states(run, request, retrieval_complete=False)
         run.target_cited = gemini_target_cited(run.citations, request)
+        property_results = compute_property_results(
+            run,
+            request,
+            retrieval_complete=False,
+            citation_complete=True,
+        )
+        run.metadata["property_results"] = property_results_to_dict(property_results)
         return run
 
 

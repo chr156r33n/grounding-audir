@@ -3,36 +3,27 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   appendOrMergeCitation,
+  citationMatchFields,
   isGroundingRedirectUrl,
   parseHtmlLinkCitations,
-  targetMatchesCitation,
 } from "../src/citations.ts";
+import { normalizeTargets } from "../src/targets.ts";
 
 const request = {
   query: "luxury hotel tokyo",
-  target: "example.com",
-  matchMode: "root_domain",
+  targets: [{ value: "example.com", matchMode: "root_domain", category: "owned" }],
   providers: ["gemini"],
 };
-
-function targetMatches(_request, candidate) {
-  try {
-    const candidateUrl = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    const targetUrl = new URL("https://example.com");
-    return candidateUrl.hostname.endsWith(targetUrl.hostname);
-  } catch {
-    return false;
-  }
-}
 
 test("parseHtmlLinkCitations reads Gemini grounding redirect anchors", () => {
   const text =
     '<a href="https://vertexaisearch.cloud.google.com/grounding-api-redirect/example" target="_blank" rel="noopener">example.com</a>';
-  const citations = parseHtmlLinkCitations(text, request, targetMatches);
+  const citations = parseHtmlLinkCitations(text, request);
   assert.equal(citations.length, 1);
   assert.match(citations[0].url, /grounding-api-redirect/);
   assert.equal(citations[0].citedText, "example.com");
   assert.equal(citations[0].targetMatch, true);
+  assert.deepEqual(citations[0].targetMatches, ["example.com"]);
 });
 
 test("isGroundingRedirectUrl detects vertex redirect links", () => {
@@ -42,27 +33,20 @@ test("isGroundingRedirectUrl detects vertex redirect links", () => {
   );
 });
 
-test("targetMatchesCitation uses anchor text when redirect URL does not match", () => {
+test("citationMatchFields uses anchor text when redirect URL does not match", () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
-  assert.equal(targetMatchesCitation(request, redirect, targetMatches, "example.com"), true);
+  const fields = citationMatchFields(request, redirect, "example.com");
+  assert.equal(fields.targetMatch, true);
+  assert.deepEqual(fields.targetMatches, ["example.com"]);
 });
 
-test("targetMatchesCitation prefers domain title over unrelated cited prose", () => {
+test("citationMatchFields prefers domain title over unrelated cited prose", () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
   const citedText =
     "**est** is a **1-Michelin-starred** fine-dining restaurant located on the 39th floor.";
-  assert.equal(
-    targetMatchesCitation(request, redirect, targetMatches, "example.com", citedText),
-    true,
-  );
-  assert.equal(
-    targetMatchesCitation(request, redirect, targetMatches, citedText, "example.com"),
-    true,
-  );
-  assert.equal(
-    targetMatchesCitation(request, redirect, targetMatches, citedText),
-    false,
-  );
+  assert.equal(citationMatchFields(request, redirect, "example.com", citedText).targetMatch, true);
+  assert.equal(citationMatchFields(request, redirect, citedText, "example.com").targetMatch, true);
+  assert.equal(citationMatchFields(request, redirect, citedText).targetMatch, false);
 });
 
 test("later HTML citation promotes a duplicate structured redirect to target match", () => {
@@ -71,6 +55,7 @@ test("later HTML citation promotes a duplicate structured redirect to target mat
     {
       url: redirect,
       targetMatch: false,
+      targetMatches: [],
     },
   ];
   appendOrMergeCitation(citations, {
@@ -78,10 +63,20 @@ test("later HTML citation promotes a duplicate structured redirect to target mat
     title: "example.com",
     citedText: "example.com",
     targetMatch: true,
+    targetMatches: ["example.com"],
   });
   assert.equal(citations.length, 1);
   assert.equal(citations[0].targetMatch, true);
   assert.equal(citations[0].citedText, "example.com");
+});
+
+test("normalizeTargets deduplicates and validates categories", () => {
+  const targets = normalizeTargets([
+    { value: "Example.com", matchMode: "root_domain", category: "owned" },
+    { value: "example.com", matchMode: "root_domain", category: "competition" },
+  ]);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].category, "owned");
 });
 
 test("Gemini parser scans google_search_result suggestion markup", async () => {

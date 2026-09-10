@@ -166,7 +166,7 @@ class MicrosoftWebIQProvider(GroundingProvider):
                 "This is retrieval evidence, not a model-generated citation layer."
             ),
         }
-        run = self.finish_states(run, retrieval_complete=True, citation_complete=False)
+        run = self.finish_states(run, request, retrieval_complete=True, citation_complete=False)
         run.target_cited = ObservationState.NOT_APPLICABLE
         return attach_observation_diagnostics(run)
 

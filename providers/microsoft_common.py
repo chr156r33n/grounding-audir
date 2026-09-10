@@ -228,6 +228,7 @@ def parse_responses_result(
     citation_complete = not anchor_references or bool(run.citations)
     return provider.finish_states(
         run,
+        request,
         retrieval_complete=sources_supported and sources_observable,
         citation_complete=citation_complete,
     )

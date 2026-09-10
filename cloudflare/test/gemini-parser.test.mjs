@@ -1,29 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// Minimal reimplementation of parseGemini citation extraction for regression coverage.
 import {
   appendOrMergeCitation,
+  citationMatchFields,
   parseHtmlLinkCitations,
-  targetMatchesCitation,
 } from "../src/citations.ts";
 
 const request = {
   query: "est restaurant tokyo",
-  target: "fourseasons.com",
-  matchMode: "root_domain",
+  targets: [{ value: "fourseasons.com", matchMode: "root_domain", category: "owned" }],
   providers: ["gemini"],
 };
-
-function targetMatches(_request, candidate) {
-  try {
-    const candidateUrl = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    const targetUrl = new URL("https://fourseasons.com");
-    return candidateUrl.hostname.endsWith(targetUrl.hostname);
-  } catch {
-    return false;
-  }
-}
 
 function parseGeminiCitations(raw) {
   const steps = Array.isArray(raw.steps) ? raw.steps : [];
@@ -35,7 +23,7 @@ function parseGeminiCitations(raw) {
       for (const result of step.result) {
         const markup = result?.search_suggestions;
         if (typeof markup !== "string") continue;
-        for (const citation of parseHtmlLinkCitations(markup, request, targetMatches)) {
+        for (const citation of parseHtmlLinkCitations(markup, request)) {
           pushCitation(citation);
         }
       }
@@ -55,7 +43,7 @@ function parseGeminiCitations(raw) {
           url,
           title,
           citedText,
-          targetMatch: targetMatchesCitation(request, url, targetMatches, title, citedText),
+          ...citationMatchFields(request, url, title, citedText),
         });
       }
     }
@@ -108,6 +96,7 @@ test("Gemini structured redirect citations match target domain from title", () =
   const fourSeasons = citations.find((citation) => citation.title === "fourseasons.com");
   assert.ok(fourSeasons);
   assert.equal(fourSeasons.targetMatch, true);
+  assert.deepEqual(fourSeasons.targetMatches, ["fourseasons.com"]);
   assert.equal(
     citations.some((citation) => citation.title === "michelin.com" && citation.targetMatch),
     false,

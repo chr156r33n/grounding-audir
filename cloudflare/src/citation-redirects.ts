@@ -1,4 +1,5 @@
 import { isGroundingRedirectUrl } from "./citations.ts";
+import { matchingTargets } from "./targets.ts";
 import type { Citation, ObservationState, RunRequest } from "./types.ts";
 
 const MAX_RESOLVE_ATTEMPTS = 12;
@@ -78,7 +79,10 @@ async function followRedirectChain(
 }
 
 export function shouldResolveCitationRedirects(request: RunRequest) {
-  return request.resolveCitationRedirects ?? request.matchMode === "url_prefix";
+  return (
+    request.resolveCitationRedirects ??
+    request.targets.some((target) => target.matchMode === "url_prefix")
+  );
 }
 
 export async function resolveGroundingRedirect(
@@ -117,7 +121,6 @@ export async function resolveGroundingRedirect(
 export async function enrichCitationsWithRedirectResolution(
   citations: Citation[],
   request: RunRequest,
-  targetMatches: (request: RunRequest, candidate: string) => boolean,
   fetcher: typeof fetch = fetch,
 ) {
   if (!shouldResolveCitationRedirects(request)) {
@@ -160,8 +163,10 @@ export async function enrichCitationsWithRedirectResolution(
     if (result.resolvedUrl) {
       citation.resolvedUrl = result.resolvedUrl;
       citation.redirectResolution = "resolved";
-      if (targetMatches(request, result.resolvedUrl)) {
-        citation.targetMatch = true;
+      const matches = matchingTargets(request, result.resolvedUrl);
+      if (matches.length) {
+        citation.targetMatches = [...new Set([...citation.targetMatches, ...matches])];
+        citation.targetMatch = citation.targetMatches.length > 0;
       }
     } else {
       citation.redirectResolution = "failed";
@@ -183,6 +188,8 @@ export function geminiTargetCited(
       !citation.targetMatch &&
       citation.redirectResolution === "failed",
   );
-  if (request.matchMode === "url_prefix" && unresolvedRedirects) return "UNKNOWN";
+  if (request.targets.some((target) => target.matchMode === "url_prefix") && unresolvedRedirects) {
+    return "UNKNOWN";
+  }
   return "NO";
 }

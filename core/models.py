@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from .enums import ErrorType, MatchMode, ObservationState, ProviderType, RunStatus
+from .enums import ErrorType, MatchMode, ObservationState, ProviderType, RunStatus, TargetCategory
 
 
 def utc_now() -> str:
@@ -15,6 +15,20 @@ def utc_now() -> str:
 class Target:
     value: str
     match_mode: MatchMode = MatchMode.ROOT_DOMAIN
+    label: str = ""
+    category: TargetCategory = TargetCategory.OWNED
+    brand_regex: str = ""
+
+
+@dataclass(frozen=True)
+class PropertyResult:
+    value: str
+    label: str
+    category: TargetCategory
+    retrieved: ObservationState
+    cited: ObservationState
+    brand_mentioned: ObservationState
+    brand_matches: tuple[str, ...] = ()
 
 
 @dataclass

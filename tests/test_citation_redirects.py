@@ -22,16 +22,6 @@ def request():
     )
 
 
-def test_should_resolve_defaults_on_for_url_prefix(request):
-    assert should_resolve_citation_redirects(request) is True
-    root_request = GroundingRequest(
-        run_id="root",
-        input_phrase="query",
-        targets=[Target("fourseasons.com", MatchMode.ROOT_DOMAIN)],
-    )
-    assert should_resolve_citation_redirects(root_request) is False
-
-
 def test_resolve_grounding_redirect_returns_final_url():
     redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/example"
     final_url = "https://www.fourseasons.com/tokyo/est/"

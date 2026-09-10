@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from .enums import MatchMode, ObservationState
@@ -11,8 +12,67 @@ if TYPE_CHECKING:
     from .models import Citation, GroundingRequest
 
 MAX_RESOLVE_ATTEMPTS = 12
+MAX_REDIRECT_HOPS = 5
 RESOLVE_TIMEOUT_SECONDS = 8.0
 USER_AGENT = "GroundingObservatory/1.0 (+https://www.torquepartnership.com/)"
+
+
+def embedded_grounding_target(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if "vertexaisearch.cloud.google.com" not in (parsed.hostname or "").lower():
+        return None
+    query = parse_qs(parsed.query)
+    for key in ("url", "q"):
+        values = query.get(key) or []
+        for value in values:
+            if value.startswith(("http://", "https://")):
+                return value
+    return None
+
+
+def _follow_redirect_chain(url: str, *, timeout: float) -> tuple[str | None, str | None]:
+    current = url
+    for _ in range(MAX_REDIRECT_HOPS):
+        if not is_grounding_redirect_url(current):
+            return current, None
+
+        advanced = False
+        for method in ("HEAD", "GET"):
+            request = Request(
+                current,
+                method=method,
+                headers={"User-Agent": USER_AGENT},
+            )
+            try:
+                with urlopen(request, timeout=timeout) as response:
+                    resolved = response.geturl()
+            except HTTPError as exc:
+                location = exc.headers.get("Location") if exc.headers else None
+                if exc.code in {301, 302, 303, 307, 308} and location:
+                    current = urljoin(current, location)
+                    advanced = True
+                    break
+                resolved = exc.geturl()
+                if resolved and resolved != current and not is_grounding_redirect_url(resolved):
+                    return resolved, None
+                return None, f"http_{exc.code}"
+            except URLError as exc:
+                return None, str(exc.reason or exc)
+            except TimeoutError:
+                return None, "timeout"
+            except OSError as exc:
+                return None, str(exc)
+
+            if resolved and resolved != current and not is_grounding_redirect_url(resolved):
+                return resolved, None
+        if not advanced:
+            break
+    if current != url and not is_grounding_redirect_url(current):
+        return current, None
+    return None, "redirect_unresolved"
 
 
 def should_resolve_citation_redirects(request: GroundingRequest) -> bool:
@@ -29,30 +89,12 @@ def resolve_grounding_redirect(
 ) -> tuple[str | None, str | None]:
     if not is_grounding_redirect_url(url):
         return None, "not_a_grounding_redirect"
-    request = Request(
-        url,
-        method="GET",
-        headers={"User-Agent": USER_AGENT},
-    )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            resolved = response.geturl()
-    except HTTPError as exc:
-        resolved = exc.geturl()
-        if not resolved or resolved == url:
-            return None, f"http_{exc.code}"
-    except URLError as exc:
-        return None, str(exc.reason or exc)
-    except TimeoutError:
-        return None, "timeout"
-    except OSError as exc:
-        return None, str(exc)
 
-    if not resolved or resolved == url:
-        return None, "redirect_unresolved"
-    if is_grounding_redirect_url(resolved):
-        return None, "redirect_still_opaque"
-    return resolved, None
+    embedded = embedded_grounding_target(url)
+    if embedded and not is_grounding_redirect_url(embedded):
+        return embedded, None
+
+    return _follow_redirect_chain(url, timeout=timeout)
 
 
 def enrich_citations_with_redirect_resolution(

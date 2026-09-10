@@ -2,13 +2,79 @@ import { isGroundingRedirectUrl } from "./citations.ts";
 import type { Citation, ObservationState, RunRequest } from "./types.ts";
 
 const MAX_RESOLVE_ATTEMPTS = 12;
+const MAX_REDIRECT_HOPS = 5;
 const RESOLVE_TIMEOUT_MS = 8_000;
+const USER_AGENT = "GroundingObservatory/1.0 (+https://www.torquepartnership.com/)";
 
 export type RedirectResolution = "resolved" | "failed" | "skipped";
 
 export interface RedirectResolveResult {
   resolvedUrl?: string;
   error?: string;
+}
+
+export function embeddedGroundingTarget(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.toLowerCase().includes("vertexaisearch.cloud.google.com")) {
+      return undefined;
+    }
+    for (const key of ["url", "q"]) {
+      const value = parsed.searchParams.get(key);
+      if (value && /^https?:\/\//i.test(value)) return value;
+    }
+  } catch {
+    // Ignore malformed URLs.
+  }
+  return undefined;
+}
+
+function resolveLocation(current: string, location: string) {
+  try {
+    return new URL(location, current).href;
+  } catch {
+    return undefined;
+  }
+}
+
+async function followRedirectChain(
+  url: string,
+  fetcher: typeof fetch,
+  signal: AbortSignal,
+) {
+  let current = url;
+  for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop += 1) {
+    if (!isGroundingRedirectUrl(current)) return current;
+
+    let advanced = false;
+    for (const method of ["HEAD", "GET"] as const) {
+      const response = await fetcher(current, {
+        method,
+        redirect: "manual",
+        signal,
+        headers: { "user-agent": USER_AGENT },
+      });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        const next = location ? resolveLocation(current, location) : undefined;
+        if (!next) continue;
+        current = next;
+        advanced = true;
+        break;
+      }
+      if (
+        response.status >= 200 &&
+        response.status < 300 &&
+        response.url &&
+        response.url !== current &&
+        !isGroundingRedirectUrl(response.url)
+      ) {
+        return response.url;
+      }
+    }
+    if (!advanced) break;
+  }
+  return isGroundingRedirectUrl(current) ? undefined : current;
 }
 
 export function shouldResolveCitationRedirects(request: RunRequest) {
@@ -22,18 +88,16 @@ export async function resolveGroundingRedirect(
   if (!isGroundingRedirectUrl(url)) {
     return { error: "not_a_grounding_redirect" };
   }
+
+  const embedded = embeddedGroundingTarget(url);
+  if (embedded && !isGroundingRedirectUrl(embedded)) {
+    return { resolvedUrl: embedded };
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
-    const response = await fetcher(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "user-agent": "GroundingObservatory/1.0 (+https://www.torquepartnership.com/)",
-      },
-    });
-    const resolvedUrl = response.url;
+    const resolvedUrl = await followRedirectChain(url, fetcher, controller.signal);
     if (!resolvedUrl || resolvedUrl === url) {
       return { error: "redirect_unresolved" };
     }

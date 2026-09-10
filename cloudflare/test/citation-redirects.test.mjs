@@ -47,9 +47,28 @@ test("shouldResolveCitationRedirects defaults on for url_prefix", () => {
 test("resolveGroundingRedirect returns final URL from fetch", async () => {
   const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/example";
   const finalUrl = "https://www.fourseasons.com/tokyo/est/";
-  const fetcher = async () => ({ url: finalUrl });
+  const fetcher = async (_url, init) => {
+    if (init?.method === "HEAD") {
+      return {
+        status: 302,
+        url: redirect,
+        headers: { get: (key) => (key.toLowerCase() === "location" ? finalUrl : null) },
+      };
+    }
+    throw new Error("unexpected method");
+  };
   const result = await resolveGroundingRedirect(redirect, fetcher);
   assert.equal(result.resolvedUrl, finalUrl);
+});
+
+test("resolveGroundingRedirect reads embedded url query parameter", async () => {
+  const redirect =
+    "https://vertexaisearch.cloud.google.com/url?q=https%3A%2F%2Fwww.fourseasons.com%2Ftokyo%2Fest%2F";
+  const fetcher = async () => {
+    throw new Error("should not fetch when query parameter contains target");
+  };
+  const result = await resolveGroundingRedirect(redirect, fetcher);
+  assert.equal(result.resolvedUrl, "https://www.fourseasons.com/tokyo/est/");
 });
 
 test("enrichCitationsWithRedirectResolution promotes prefix matches from resolved URL", async () => {
@@ -61,8 +80,13 @@ test("enrichCitationsWithRedirectResolution promotes prefix matches from resolve
       targetMatch: false,
     },
   ];
-  const fetcher = async () => ({
-    url: "https://www.fourseasons.com/tokyo/est/",
+  const fetcher = async (_url, init) => ({
+    status: init?.method === "HEAD" ? 302 : 200,
+    url: redirect,
+    headers: {
+      get: (key) =>
+        key.toLowerCase() === "location" ? "https://www.fourseasons.com/tokyo/est/" : null,
+    },
   });
   await enrichCitationsWithRedirectResolution(citations, request, targetMatches, fetcher);
   assert.equal(citations[0].resolvedUrl, "https://www.fourseasons.com/tokyo/est/");

@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from core.diagnostics import attach_observation_diagnostics
-from core.enums import ObservationState, ProviderType, RunStatus
+from core.enums import ObservationState, ProviderType, RunStatus, TargetCategory
 from core.matching import matching_targets, matching_targets_for_citation, normalize_url, registrable_domain
 from core.models import (
     Citation,
@@ -17,6 +17,7 @@ from core.models import (
     ProviderCapabilities,
     ProviderField,
 )
+from core.targets import aggregate_target_state, compute_property_results, property_results_to_dict
 
 CANONICAL_INSTRUCTION = """Use web search to answer the following query.
 Ground the response using current public web sources.
@@ -150,22 +151,18 @@ class GroundingProvider(ABC):
     def finish_states(
         self,
         run: GroundingRun,
+        request: GroundingRequest,
         *,
         retrieval_complete: bool = False,
         citation_complete: bool = True,
     ) -> GroundingRun:
-        run.target_retrieved = (
-            ObservationState.YES
-            if any(source.target_matches for source in run.sources)
-            else ObservationState.NO
-            if retrieval_complete
-            else ObservationState.UNKNOWN
+        property_results = compute_property_results(
+            run,
+            request,
+            retrieval_complete=retrieval_complete,
+            citation_complete=citation_complete,
         )
-        run.target_cited = (
-            ObservationState.YES
-            if any(citation.target_matches for citation in run.citations)
-            else ObservationState.NO
-            if citation_complete
-            else ObservationState.UNKNOWN
-        )
+        run.metadata["property_results"] = property_results_to_dict(property_results)
+        run.target_retrieved = aggregate_target_state(property_results, "retrieved")
+        run.target_cited = aggregate_target_state(property_results, "cited")
         return attach_observation_diagnostics(run)

@@ -9,35 +9,29 @@ import {
 
 const request = {
   query: "est restaurant tokyo",
-  target: "https://www.fourseasons.com/tokyo/est/",
-  matchMode: "url_prefix",
+  targets: [
+    {
+      value: "https://www.fourseasons.com/tokyo/est/",
+      matchMode: "url_prefix",
+      category: "owned",
+    },
+  ],
   providers: ["gemini"],
 };
-
-function targetMatches(_request, candidate) {
-  try {
-    const candidateUrl = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    const targetUrl = new URL("https://www.fourseasons.com/tokyo/est/");
-    return (
-      candidateUrl.origin === targetUrl.origin &&
-      (candidateUrl.pathname === targetUrl.pathname ||
-        candidateUrl.pathname.startsWith(`${targetUrl.pathname.replace(/\/$/, "")}/`))
-    );
-  } catch {
-    return false;
-  }
-}
 
 test("shouldResolveCitationRedirects defaults on for url_prefix", () => {
   assert.equal(shouldResolveCitationRedirects(request), true);
   assert.equal(
-    shouldResolveCitationRedirects({ ...request, matchMode: "root_domain" }),
+    shouldResolveCitationRedirects({
+      ...request,
+      targets: [{ value: "example.com", matchMode: "root_domain", category: "owned" }],
+    }),
     false,
   );
   assert.equal(
     shouldResolveCitationRedirects({
       ...request,
-      matchMode: "root_domain",
+      targets: [{ value: "example.com", matchMode: "root_domain", category: "owned" }],
       resolveCitationRedirects: true,
     }),
     true,
@@ -78,6 +72,7 @@ test("enrichCitationsWithRedirectResolution promotes prefix matches from resolve
       url: redirect,
       title: "fourseasons.com",
       targetMatch: false,
+      targetMatches: [],
     },
   ];
   const fetcher = async (_url, init) => ({
@@ -88,9 +83,10 @@ test("enrichCitationsWithRedirectResolution promotes prefix matches from resolve
         key.toLowerCase() === "location" ? "https://www.fourseasons.com/tokyo/est/" : null,
     },
   });
-  await enrichCitationsWithRedirectResolution(citations, request, targetMatches, fetcher);
+  await enrichCitationsWithRedirectResolution(citations, request, fetcher);
   assert.equal(citations[0].resolvedUrl, "https://www.fourseasons.com/tokyo/est/");
   assert.equal(citations[0].targetMatch, true);
+  assert.deepEqual(citations[0].targetMatches, ["https://www.fourseasons.com/tokyo/est/"]);
   assert.equal(geminiTargetCited(citations, request), "YES");
 });
 
@@ -101,12 +97,13 @@ test("geminiTargetCited is UNKNOWN when url_prefix redirects fail to resolve", a
       url: redirect,
       title: "fourseasons.com",
       targetMatch: false,
+      targetMatches: [],
     },
   ];
   const fetcher = async () => {
     throw new Error("timeout");
   };
-  await enrichCitationsWithRedirectResolution(citations, request, targetMatches, fetcher);
+  await enrichCitationsWithRedirectResolution(citations, request, fetcher);
   assert.equal(citations[0].redirectResolution, "failed");
   assert.equal(geminiTargetCited(citations, request), "UNKNOWN");
 });

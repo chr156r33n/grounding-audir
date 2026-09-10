@@ -35,6 +35,12 @@ class MatchMode(str, Enum):
     URL_PREFIX = "url_prefix"
 
 
+class TargetCategory(str, Enum):
+    OWNED = "owned"
+    OF_INTEREST = "of_interest"
+    COMPETITION = "competition"
+
+
 class ProviderType(str, Enum):
     GROUNDING = "grounding"
     RETRIEVAL = "retrieval"

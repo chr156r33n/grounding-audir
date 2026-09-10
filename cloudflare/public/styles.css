@@ -411,6 +411,86 @@ footer a { color: var(--navy-soft); text-decoration: none; }
 footer a:hover { color: var(--blue); }
 footer span { color: var(--blue-bright); }
 
+.field-grid .full-width { grid-column: 1 / -1; }
+.properties-fieldset {
+  border: 1px solid var(--line);
+  padding: 16px 18px 18px;
+  margin: 0 0 23px;
+}
+.properties-fieldset legend {
+  padding: 0 6px;
+  font: 700 12px var(--mono);
+  color: var(--navy-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.property-row {
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.property-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.property-row-head strong {
+  font: 700 12px var(--mono);
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.property-row-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.property-row-grid label { display: grid; gap: 6px; }
+.property-row-grid label span {
+  font: 600 11px var(--mono);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.property-matrix {
+  margin-top: 24px;
+  overflow: auto;
+}
+.property-matrix table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.property-matrix th,
+.property-matrix td {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.property-matrix th {
+  background: var(--paper);
+  font: 700 11px var(--mono);
+  color: var(--navy-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.property-matrix td.state {
+  font: 700 12px var(--mono);
+  white-space: nowrap;
+}
+.property-matrix tr.category-owned td:first-child { border-left: 3px solid var(--blue); }
+.property-matrix tr.category-of_interest td:first-child { border-left: 3px solid #7a8aa0; }
+.property-matrix tr.category-competition td:first-child { border-left: 3px solid #c45c26; }
+.property-matrix .provider-group {
+  text-align: center;
+  background: rgba(0, 102, 204, 0.06);
+}
+
 @media (max-width: 900px) {
   .hero, .workspace { grid-template-columns: 1fr; }
   .hero { gap: 30px; padding-top: 55px; }

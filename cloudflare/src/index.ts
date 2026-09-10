@@ -1,6 +1,6 @@
 import { discoverQueries, type DiscoveryRequest } from "./discovery.ts";
-import { compileBrandRegex, matchBrand } from "./brand-match.ts";
 import { configuredProviders, runProvider } from "./providers.ts";
+import { parseRunTargets, validateRunTargets } from "./targets.ts";
 import type { Env, ProviderId, RunRequest } from "./types.ts";
 
 const PROVIDER_IDS = new Set<ProviderId>([
@@ -54,20 +54,12 @@ export default {
         const providerRuns = await Promise.all(
           runRequest.providers.map((id) => runProvider(id, runRequest, env)),
         );
-        const runs = providerRuns.map((run) => {
-          const brandMatch = matchBrand(run.responseText, runRequest.brandRegex);
-          return {
-            ...run,
-            brandMentioned: brandMatch.state,
-            brandMatches: brandMatch.matches,
-          };
-        });
         return json({
           runId: crypto.randomUUID(),
           startedAt,
           finishedAt: new Date().toISOString(),
           request: runRequest,
-          runs,
+          runs: providerRuns,
         });
       } catch (error) {
         return json({ error: message(error) }, 400);
@@ -90,30 +82,18 @@ export default {
 
 function validateRun(body: Partial<RunRequest>): RunRequest {
   const query = String(body.query || "").trim();
-  const target = String(body.target || "").trim();
   if (!query) throw new Error("Query is required.");
-  if (!target) throw new Error("Target domain or URL is required.");
-  const brandRegex = String(body.brandRegex || "").trim();
-  compileBrandRegex(brandRegex);
-  try {
-    new URL(target.includes("://") ? target : `https://${target}`);
-  } catch {
-    throw new Error("Target must be a valid domain or HTTP(S) URL.");
-  }
+  const targets = validateRunTargets(parseRunTargets(body));
   const providers = Array.isArray(body.providers)
     ? body.providers.filter((id): id is ProviderId => PROVIDER_IDS.has(id as ProviderId))
     : [];
   if (!providers.length) throw new Error("Select at least one configured provider.");
-  const matchMode = ["root_domain", "exact_hostname", "url_prefix"].includes(
-    String(body.matchMode),
-  )
-    ? (body.matchMode as RunRequest["matchMode"])
-    : "root_domain";
   return {
     query: query.slice(0, 1_000),
-    target: target.slice(0, 2_000),
-    matchMode,
-    brandRegex: brandRegex || undefined,
+    targets,
+    target: targets[0]?.value,
+    matchMode: targets[0]?.matchMode,
+    brandRegex: targets[0]?.brandRegex,
     resolveCitationRedirects:
       body.resolveCitationRedirects === undefined
         ? undefined

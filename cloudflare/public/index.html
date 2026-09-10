@@ -52,25 +52,7 @@
             <small class="field-help">Select multiple discovered queries with Use, or enter several phrases separated by new lines or commas.</small>
           </label>
           <div class="field-grid">
-            <label>
-              <span>Target domain or URL</span>
-              <input id="target" required placeholder="example.com" />
-            </label>
-            <label>
-              <span title="Case-insensitive regex tested against each generated response">
-                Brand response regex <small>optional</small>
-              </span>
-              <input id="brand-regex" placeholder="\bExample Brand\b" />
-            </label>
-            <label>
-              <span>Match mode</span>
-              <select id="match-mode">
-                <option value="root_domain">Root domain</option>
-                <option value="exact_hostname">Exact hostname</option>
-                <option value="url_prefix">URL prefix</option>
-              </select>
-            </label>
-            <label>
+            <label class="full-width">
               <span>Market</span>
               <select id="market">
                 <option value="en-GB" selected>United Kingdom (en-GB)</option>
@@ -90,6 +72,16 @@
               </select>
             </label>
           </div>
+
+          <fieldset id="properties-fieldset" class="properties-fieldset">
+            <legend>Properties to monitor <small>(up to 5)</small></legend>
+            <p class="field-help">
+              Tag each URL or domain as owned, of interest, or competition. Per-property match mode
+              and brand regex are supported.
+            </p>
+            <div id="property-list"></div>
+            <button id="add-property" class="secondary" type="button">Add property</button>
+          </fieldset>
 
           <fieldset>
             <legend>Providers</legend>
@@ -143,6 +135,7 @@
           <button id="download-button" class="text-button" type="button">Download JSON ↓</button>
         </div>
         <div id="summary-grid" class="summary-grid"></div>
+        <div id="property-matrix" class="property-matrix"></div>
         <div id="run-details" class="run-details"></div>
       </section>
     </main>

@@ -10,7 +10,9 @@ test("edge UI exposes run and discovery controls", async () => {
   assert.match(html, /id="results"/);
   assert.match(html, /<select id="market"/);
   assert.match(html, /<select id="language"/);
-  assert.match(html, /id="brand-regex"/);
+  assert.match(html, /id="property-list"/);
+  assert.match(html, /id="add-property"/);
+  assert.match(html, /id="property-matrix"/);
   assert.match(html, /id="resolve-redirects"/);
   assert.match(html, /Torque Partnership/);
   assert.match(html, /Turning Digital/);
@@ -36,7 +38,8 @@ test("client supports multi-phrase runs and candidate toggles", async () => {
   assert.match(script, /function splitInputPhrases/);
   assert.match(script, /function toggleCandidateQuery/);
   assert.match(script, /selectedCandidateQueries/);
-  assert.match(script, /result\.batches/);
+  assert.match(script, /function collectTargets/);
+  assert.match(script, /renderPropertyMatrix/);
 });
 
 test("client calls only same-origin API routes", async () => {

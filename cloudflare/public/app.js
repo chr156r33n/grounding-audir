@@ -1,8 +1,21 @@
 const $ = (selector) => document.querySelector(selector);
 let lastResult = null;
 let lastRuns = [];
+let lastRequest = null;
 let lastDiscoveryCandidates = [];
 let selectedCandidateQueries = new Set();
+const MAX_PROPERTIES = 5;
+const CATEGORY_OPTIONS = [
+  { value: "owned", label: "Owned" },
+  { value: "of_interest", label: "Of interest" },
+  { value: "competition", label: "Competition" },
+];
+const MATCH_OPTIONS = [
+  { value: "root_domain", label: "Root domain" },
+  { value: "exact_hostname", label: "Exact hostname" },
+  { value: "url_prefix", label: "URL prefix" },
+];
+let propertyCount = 1;
 
 function splitInputPhrases(value) {
   return String(value || "")
@@ -17,6 +30,85 @@ function syncQueryFieldFromSelection() {
     .map((candidate) => candidate.query)
     .filter((query) => selectedCandidateQueries.has(query));
   $("#query").value = ordered.join("\n");
+}
+
+function propertyRowHtml(index) {
+  const categoryOptions = CATEGORY_OPTIONS.map(
+    (option) =>
+      `<option value="${option.value}">${escapeHtml(option.label)}</option>`,
+  ).join("");
+  const matchOptions = MATCH_OPTIONS.map(
+    (option) =>
+      `<option value="${option.value}">${escapeHtml(option.label)}</option>`,
+  ).join("");
+  return `
+    <div class="property-row" data-property-index="${index}">
+      <div class="property-row-head">
+        <strong>Property ${index + 1}</strong>
+        ${
+          index > 0
+            ? `<button type="button" class="text-button remove-property" data-index="${index}">Remove</button>`
+            : ""
+        }
+      </div>
+      <div class="property-row-grid">
+        <label>
+          <span>URL or domain</span>
+          <input class="property-value" ${index === 0 ? "required" : ""} placeholder="example.com" />
+        </label>
+        <label>
+          <span>Label</span>
+          <input class="property-label" placeholder="Optional display name" />
+        </label>
+        <label>
+          <span>Category</span>
+          <select class="property-category">${categoryOptions}</select>
+        </label>
+        <label>
+          <span>Match mode</span>
+          <select class="property-match">${matchOptions}</select>
+        </label>
+        <label class="full-width">
+          <span>Brand regex</span>
+          <input class="property-brand" placeholder="Optional, per property" />
+        </label>
+      </div>
+    </div>`;
+}
+
+function renderPropertyRows() {
+  const list = $("#property-list");
+  if (!list) return;
+  list.innerHTML = Array.from({ length: propertyCount }, (_, index) => propertyRowHtml(index)).join("");
+  list.querySelectorAll(".remove-property").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (propertyCount <= 1) return;
+      propertyCount -= 1;
+      renderPropertyRows();
+      syncResolveRedirectsDefault();
+    });
+  });
+  list.querySelectorAll(".property-match").forEach((select) => {
+    select.addEventListener("change", syncResolveRedirectsDefault);
+  });
+  $("#add-property").disabled = propertyCount >= MAX_PROPERTIES;
+}
+
+function collectTargets() {
+  const rows = [...document.querySelectorAll(".property-row")];
+  const targets = rows
+    .map((row) => ({
+      value: row.querySelector(".property-value")?.value.trim() || "",
+      label: row.querySelector(".property-label")?.value.trim() || "",
+      category: row.querySelector(".property-category")?.value || "owned",
+      matchMode: row.querySelector(".property-match")?.value || "root_domain",
+      brandRegex: row.querySelector(".property-brand")?.value.trim() || "",
+    }))
+    .filter((target) => target.value);
+  if (!targets.length) {
+    throw new Error("Add at least one property to monitor.");
+  }
+  return targets;
 }
 
 function updateCandidateButtonStates() {
@@ -102,10 +194,9 @@ $("#run-form").addEventListener("submit", async (event) => {
     const providers = [...document.querySelectorAll('input[name="provider"]:checked')].map(
       (input) => input.value,
     );
+    const targets = collectTargets();
     const shared = {
-      target: $("#target").value,
-      brandRegex: $("#brand-regex").value,
-      matchMode: $("#match-mode").value,
+      targets,
       resolveCitationRedirects: $("#resolve-redirects").checked,
       market: $("#market").value,
       language: $("#language").value,
@@ -124,6 +215,7 @@ $("#run-form").addEventListener("submit", async (event) => {
       batches.push({ query, ...result });
     }
     lastResult = batches.length === 1 ? batches[0] : { batches };
+    lastRequest = batches.length === 1 ? batches[0].request : batches[0]?.request || null;
     renderResults(lastResult);
   } catch (caught) {
     error.textContent = caught.message;
@@ -206,66 +298,124 @@ $("#download-button").addEventListener("click", () => {
 
 function renderResults(result) {
   const results = $("#results");
-  if (result.batches?.length) {
-    lastRuns = result.batches.flatMap((batch) =>
-      (batch.runs || []).map((run) => ({ ...run, inputQuery: batch.query })),
-    );
-    $("#summary-grid").innerHTML = result.batches
-      .map(
-        (batch) => `
-          <section class="query-batch">
-            <p class="query-batch-label">${escapeHtml(batch.query)}</p>
-            <div class="summary-grid-inner">
-              ${(batch.runs || [])
-                .map(
-                  (run) => `
-                    <article class="summary-card">
-                      <h3>${escapeHtml(run.providerName)}</h3>
-                      <div class="state ${run.targetCited}">${run.targetCited}</div>
-                      <small>target cited · brand ${run.brandMentioned || "N/A"} · ${(run.latencyMs / 1000).toFixed(1)}s</small>
-                    </article>`,
-                )
-                .join("")}
-            </div>
-          </section>`,
-      )
-      .join("");
-    let runIndex = 0;
-    $("#run-details").innerHTML = result.batches
-      .map(
-        (batch) => `
-          <section class="query-batch">
-            <p class="query-batch-label">${escapeHtml(batch.query)}</p>
+  const batches = result.batches?.length ? result.batches : [result];
+  lastRuns = batches.flatMap((batch) =>
+    (batch.runs || []).map((run) => ({ ...run, inputQuery: batch.query })),
+  );
+  lastRequest = batches[0]?.request || result.request || lastRequest;
+  $("#summary-grid").innerHTML = batches
+    .map(
+      (batch) => `
+        <section class="query-batch">
+          <p class="query-batch-label">${escapeHtml(batch.query)}</p>
+          <div class="summary-grid-inner">
             ${(batch.runs || [])
-              .map(() => {
-                const index = runIndex;
-                runIndex += 1;
-                return renderRunShell(lastRuns[index], index);
-              })
+              .map(
+                (run) => `
+                  <article class="summary-card">
+                    <h3>${escapeHtml(run.providerName)}</h3>
+                    <div class="state ${run.targetCited}">${run.targetCited}</div>
+                    <small>any property cited · ${(run.latencyMs / 1000).toFixed(1)}s</small>
+                  </article>`,
+              )
               .join("")}
-          </section>`,
-      )
-      .join("");
-  } else {
-    lastRuns = result.runs || [];
-    $("#summary-grid").innerHTML = `
-      <div class="summary-grid-inner">
-        ${result.runs
-          .map(
-            (run) => `
-              <article class="summary-card">
-                <h3>${escapeHtml(run.providerName)}</h3>
-                <div class="state ${run.targetCited}">${run.targetCited}</div>
-                <small>target cited · brand ${run.brandMentioned || "N/A"} · ${(run.latencyMs / 1000).toFixed(1)}s</small>
-              </article>`,
-          )
-          .join("")}
-      </div>`;
-    $("#run-details").innerHTML = result.runs.map((run, index) => renderRunShell(run, index)).join("");
-  }
+          </div>
+        </section>`,
+    )
+    .join("");
+  renderPropertyMatrix(batches);
+  let runIndex = 0;
+  $("#run-details").innerHTML = batches
+    .map(
+      (batch) => `
+        <section class="query-batch">
+          <p class="query-batch-label">${escapeHtml(batch.query)}</p>
+          ${(batch.runs || [])
+            .map(() => {
+              const index = runIndex;
+              runIndex += 1;
+              return renderRunShell(lastRuns[index], index);
+            })
+            .join("")}
+        </section>`,
+    )
+    .join("");
   bindLazyRunPanels();
   results.hidden = false;
   results.scrollIntoView({ block: "start" });
+}
+
+function renderPropertyMatrix(batches) {
+  const matrix = $("#property-matrix");
+  if (!matrix) return;
+  const request = batches[0]?.request || lastRequest;
+  const targets = request?.targets || [];
+  const runs = batches.flatMap((batch) =>
+    (batch.runs || []).map((run) => ({ ...run, inputQuery: batch.query })),
+  );
+  if (!targets.length || !runs.length) {
+    matrix.innerHTML = "";
+    return;
+  }
+  const providerHeaders = runs
+    .map(
+      (run) => `
+        <th colspan="3" class="provider-group">${escapeHtml(
+          batches.length > 1 ? `${run.providerName} · ${run.inputQuery}` : run.providerName,
+        )}</th>`,
+    )
+    .join("");
+  const metricHeaders = runs
+    .map(() => `<th>Retrieved</th><th>Cited</th><th>Brand</th>`)
+    .join("");
+  const body = targets
+    .map((target) => {
+      const cells = runs
+        .map((run) => {
+          const match = (run.propertyResults || []).find((item) => item.value === target.value);
+          const retrieved = match?.retrieved || run.targetRetrieved || "UNKNOWN";
+          const cited = match?.cited || run.targetCited || "UNKNOWN";
+          const brand = match?.brandMentioned || "N/A";
+          return `
+            <td class="state ${retrieved}">${escapeHtml(retrieved)}</td>
+            <td class="state ${cited}">${escapeHtml(cited)}</td>
+            <td class="state ${brand}">${escapeHtml(brand)}</td>`;
+        })
+        .join("");
+      const label = target.label || target.value;
+      return `
+        <tr class="category-${target.category || "owned"}">
+          <td>
+            <strong>${escapeHtml(label)}</strong>
+            <div class="muted">${escapeHtml(target.value)}</div>
+          </td>
+          <td>${escapeHtml(formatCategory(target.category))}</td>
+          ${cells}
+        </tr>`;
+    })
+    .join("");
+  matrix.innerHTML = `
+    <p class="micro-label">Property comparison matrix</p>
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Property</th>
+          <th rowspan="2">Category</th>
+          ${providerHeaders}
+        </tr>
+        <tr>${metricHeaders}</tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+}
+
+function formatCategory(category) {
+  return CATEGORY_OPTIONS.find((item) => item.value === category)?.label || category || "Owned";
+}
+
+function formatPropertyMatches(values) {
+  if (!values?.length) return "";
+  return ` · ${values.map((item) => escapeHtml(item)).join(", ")}`;
 }
 
 function bindLazyRunPanels() {
@@ -297,14 +447,14 @@ function bindRawBlock(block, run) {
 }
 
 function renderRunShell(run, index) {
-  const brand = run.brandMentioned && run.brandMentioned !== "N/A"
-    ? ` · brand ${run.brandMentioned}`
-    : "";
+  const propertySummary = (run.propertyResults || [])
+    .map((item) => `${item.label || item.value}: ${item.cited}`)
+    .join(" · ");
   return `
     <details class="run-panel" data-run-index="${index}">
       <summary>
         <span>${escapeHtml(run.providerName)}</span>
-        <span>${run.status === "failed" ? "FAILED" : `retrieved ${run.targetRetrieved} · cited ${run.targetCited}${brand}`}</span>
+        <span>${run.status === "failed" ? "FAILED" : propertySummary || `retrieved ${run.targetRetrieved} · cited ${run.targetCited}`}</span>
       </summary>
     </details>`;
 }
@@ -319,7 +469,7 @@ function renderSourceSection(title, caption, sources, emptyMessage) {
         `<li><a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener">${escapeHtml(
           source.title || source.url,
         )}${source.callStatus ? ` · ${escapeHtml(source.callStatus)}` : ""}${
-          source.targetMatch ? " · TARGET" : ""
+          formatPropertyMatches(source.targetMatches)
         }</a></li>`,
     )
     .join("")}</ul></div>`;
@@ -352,7 +502,7 @@ function renderRunBody(run, index) {
                 : "";
             return `<li><a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
               citation.title || citation.url,
-            )}${citation.targetMatch ? " · TARGET" : ""}${resolved}</a></li>`;
+            )}${formatPropertyMatches(citation.targetMatches)}${resolved}</a></li>`;
           },
         )
         .join("")}</ul></div>`
@@ -376,16 +526,23 @@ function renderRunBody(run, index) {
   const raw = run.rawResponse
     ? `<details class="raw-block"><summary>Show sanitised raw response</summary><pre class="raw-pre">Open to load response JSON…</pre></details>`
     : "";
-  const brandMatch = run.brandMentioned && run.brandMentioned !== "N/A"
-    ? `<div><h4>Brand mentioned</h4><p class="muted">${escapeHtml(run.brandMentioned)}${
-        run.brandMatches?.length
-          ? ` · matched ${run.brandMatches.map((item) => `"${escapeHtml(item)}"`).join(", ")}`
-          : ""
-      }</p></div>`
+  const propertyResults = run.propertyResults?.length
+    ? `<div><h4>Property results</h4><table class="property-mini-table"><thead><tr><th>Property</th><th>Category</th><th>Retrieved</th><th>Cited</th><th>Brand</th></tr></thead><tbody>${run.propertyResults
+        .map(
+          (item) => `
+            <tr>
+              <td>${escapeHtml(item.label || item.value)}</td>
+              <td>${escapeHtml(formatCategory(item.category))}</td>
+              <td class="state ${item.retrieved}">${escapeHtml(item.retrieved)}</td>
+              <td class="state ${item.cited}">${escapeHtml(item.cited)}</td>
+              <td class="state ${item.brandMentioned}">${escapeHtml(item.brandMentioned)}</td>
+            </tr>`,
+        )
+        .join("")}</tbody></table></div>`
     : "";
   return `
     ${run.error ? `<p class="error">${escapeHtml(run.error)}</p>` : ""}
-    ${brandMatch}
+    ${propertyResults}
     ${queries}
     ${renderSourceSection(
       "Opened pages",
@@ -419,15 +576,25 @@ function escapeAttribute(value) {
 }
 
 loadConfig();
+renderPropertyRows();
+$("#add-property")?.addEventListener("click", () => {
+  if (propertyCount >= MAX_PROPERTIES) return;
+  propertyCount += 1;
+  renderPropertyRows();
+  syncResolveRedirectsDefault();
+});
 
 function syncResolveRedirectsDefault() {
-  const matchMode = $("#match-mode")?.value;
   const checkbox = $("#resolve-redirects");
   if (!checkbox || checkbox.dataset.userTouched === "true") return;
-  checkbox.checked = matchMode === "url_prefix";
+  checkbox.checked = [...document.querySelectorAll(".property-match")].some(
+    (select) => select.value === "url_prefix",
+  );
 }
 
-$("#match-mode")?.addEventListener("change", syncResolveRedirectsDefault);
+document.querySelectorAll(".property-match").forEach((select) => {
+  select.addEventListener("change", syncResolveRedirectsDefault);
+});
 $("#resolve-redirects")?.addEventListener("change", (event) => {
   event.currentTarget.dataset.userTouched = "true";
 });

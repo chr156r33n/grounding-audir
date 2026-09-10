@@ -3,6 +3,10 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from core.citation_redirects import (
+    enrich_citations_with_redirect_resolution,
+    gemini_target_cited,
+)
 from core.enums import ObservationState
 from core.models import GeneratedQuery, GroundingRequest, ProviderCapabilities, ProviderField, utc_now
 
@@ -156,6 +160,7 @@ class GeminiProvider(GroundingProvider):
             if not run.citations:
                 for citation in parse_markdown_link_citations(self, request, run.response_text):
                     _append_or_merge_citation(run.citations, citation)
+        enrich_citations_with_redirect_resolution(run.citations, request)
         run.search_performed = (
             ObservationState.YES
             if search_calls
@@ -180,7 +185,9 @@ class GeminiProvider(GroundingProvider):
                 "retrieved-source list; citations must not be treated as retrieval."
             ),
         }
-        return self.finish_states(run, retrieval_complete=False)
+        run = self.finish_states(run, retrieval_complete=False)
+        run.target_cited = gemini_target_cited(run.citations, request)
+        return run
 
 
 def _append_or_merge_citation(citations: list[Any], incoming: Any) -> None:

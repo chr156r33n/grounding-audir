@@ -13,6 +13,10 @@ import {
   parseMarkdownLinkCitations,
   targetMatchesCitation,
 } from "./citations.ts";
+import {
+  enrichCitationsWithRedirectResolution,
+  geminiTargetCited,
+} from "./citation-redirects.ts";
 import { getDomain } from "tldts";
 
 const NAMES: Record<ProviderId, string> = {
@@ -85,7 +89,7 @@ export async function runProvider(
     } else if (id === "gemini") {
       model = env.GEMINI_MODEL;
       raw = await geminiFetch(request, env);
-      return parseGemini(raw, request, model, Date.now() - started);
+      return await parseGemini(raw, request, model, Date.now() - started);
     } else {
       model = "web-search";
       raw = await webIqFetch(request, env);
@@ -320,12 +324,12 @@ function parseResponses(
   };
 }
 
-function parseGemini(
+async function parseGemini(
   raw: unknown,
   request: RunRequest,
   model: string,
   latencyMs: number,
-): ProviderRun {
+): Promise<ProviderRun> {
   const payload = isRecord(raw) ? raw : {};
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
   const generatedQueries: GeneratedQuery[] = [];
@@ -390,6 +394,7 @@ function parseGemini(
       }
     }
   }
+  await enrichCitationsWithRedirectResolution(citations, request, targetMatches);
   return {
     providerId: "gemini",
     providerName: NAMES.gemini,
@@ -398,7 +403,7 @@ function parseGemini(
     latencyMs,
     searchPerformed: searchCalls ? "YES" : steps.length ? "NO" : "UNKNOWN",
     targetRetrieved: "UNKNOWN",
-    targetCited: citations.some((citation) => citation.targetMatch) ? "YES" : "NO",
+    targetCited: geminiTargetCited(citations, request),
     generatedQueries,
     sources: [],
     citations,

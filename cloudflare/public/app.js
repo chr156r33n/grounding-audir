@@ -106,6 +106,7 @@ $("#run-form").addEventListener("submit", async (event) => {
       target: $("#target").value,
       brandRegex: $("#brand-regex").value,
       matchMode: $("#match-mode").value,
+      resolveCitationRedirects: $("#resolve-redirects").checked,
       market: $("#market").value,
       language: $("#language").value,
       debug: $("#debug").checked,
@@ -343,10 +344,16 @@ function renderRunBody(run, index) {
   const citations = run.citations?.length
     ? `<div><h4>Citations</h4><p class="muted">Inline URL citations exposed in the final answer.</p><ul class="link-list">${run.citations
         .map(
-          (citation) =>
-            `<li><a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
+          (citation) => {
+            const resolved = citation.resolvedUrl
+              ? ` · resolved ${escapeHtml(citation.resolvedUrl)}`
+              : citation.redirectResolution === "failed"
+                ? " · redirect unresolved"
+                : "";
+            return `<li><a href="${escapeAttribute(citation.url)}" target="_blank" rel="noopener">${escapeHtml(
               citation.title || citation.url,
-            )}${citation.targetMatch ? " · TARGET" : ""}</a></li>`,
+            )}${citation.targetMatch ? " · TARGET" : ""}${resolved}</a></li>`;
+          },
         )
         .join("")}</ul></div>`
     : `<div><h4>Citations</h4><p class="muted">No inline URL citations were exposed. Check Opened pages if the provider opened target URLs during search.</p></div>`;
@@ -412,3 +419,16 @@ function escapeAttribute(value) {
 }
 
 loadConfig();
+
+function syncResolveRedirectsDefault() {
+  const matchMode = $("#match-mode")?.value;
+  const checkbox = $("#resolve-redirects");
+  if (!checkbox || checkbox.dataset.userTouched === "true") return;
+  checkbox.checked = matchMode === "url_prefix";
+}
+
+$("#match-mode")?.addEventListener("change", syncResolveRedirectsDefault);
+$("#resolve-redirects")?.addEventListener("change", (event) => {
+  event.currentTarget.dataset.userTouched = "true";
+});
+syncResolveRedirectsDefault();

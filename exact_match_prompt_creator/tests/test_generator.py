@@ -1,6 +1,6 @@
 import socket
-
-import pytest
+import unittest
+from unittest.mock import patch
 
 from exact_match_prompt_creator.generator import (
     PromptCreatorError,
@@ -38,97 +38,104 @@ HTML = """
 """
 
 
-def test_html_evidence_excludes_scripts_and_navigation():
-    evidence = evidence_from_content(HTML, source="https://example.com/hotel")
+class PromptGeneratorTests(unittest.TestCase):
+    def test_html_evidence_excludes_scripts_and_navigation(self):
+        evidence = evidence_from_content(HTML, source="https://example.com/hotel")
 
-    assert evidence.title == "Harbour Hotel Hong Kong"
-    assert evidence.content_type == "text/html"
-    assert any("rooftop pool" in chunk.text for chunk in evidence.chunks)
-    assert all("navigation sentence" not in chunk.text for chunk in evidence.chunks)
-    assert all("ignoreThisInstruction" not in chunk.text for chunk in evidence.chunks)
+        self.assertEqual(evidence.title, "Harbour Hotel Hong Kong")
+        self.assertEqual(evidence.content_type, "text/html")
+        self.assertTrue(any("rooftop pool" in chunk.text for chunk in evidence.chunks))
+        self.assertTrue(
+            all("navigation sentence" not in chunk.text for chunk in evidence.chunks)
+        )
+        self.assertTrue(
+            all("ignoreThisInstruction" not in chunk.text for chunk in evidence.chunks)
+        )
 
+    def test_anchor_selection_prefers_specific_page_facts(self):
+        evidence = evidence_from_content(HTML)
+        anchors = select_anchor_passages(evidence, limit=4)
 
-def test_anchor_selection_prefers_specific_page_facts():
-    evidence = evidence_from_content(HTML)
-    anchors = select_anchor_passages(evidence, limit=4)
+        self.assertGreaterEqual(len(anchors), 3)
+        self.assertTrue(any("7am until 9pm" in anchor for anchor in anchors))
+        self.assertTrue(any("Cantonese" in anchor for anchor in anchors))
 
-    assert len(anchors) >= 3
-    assert any("7am until 9pm" in anchor for anchor in anchors)
-    assert any("Cantonese" in anchor for anchor in anchors)
+    def test_exact_match_prompts_include_verbatim_phrase(self):
+        evidence = evidence_from_content(HTML)
 
+        def fake_generator(instructions):
+            self.assertTrue(
+                all("Return only the question" in item for item in instructions)
+            )
+            return [
+                "When is the rooftop pool open?",
+                "What kind of dining is available?",
+                "Which family accommodation can guests book?",
+                "Where can guests have afternoon tea?",
+            ][: len(instructions)]
 
-def test_exact_match_prompts_include_verbatim_phrase():
-    evidence = evidence_from_content(HTML)
+        prompts = generate_prompts(
+            evidence,
+            count=4,
+            generator=fake_generator,
+            exact_match=True,
+        )
 
-    def fake_generator(instructions):
-        assert all("Return only the question" in item for item in instructions)
-        return [
-            "When is the rooftop pool open?",
-            "What kind of dining is available?",
-            "Which family accommodation can guests book?",
-            "Where can guests have afternoon tea?",
-        ][: len(instructions)]
+        self.assertGreaterEqual(len(prompts), 3)
+        self.assertTrue(
+            all(item.exact_phrase in item.source_excerpt for item in prompts)
+        )
+        self.assertTrue(
+            all(
+                f'exact phrase "{item.exact_phrase}"' in item.prompt
+                for item in prompts
+            )
+        )
 
-    prompts = generate_prompts(
-        evidence,
-        count=4,
-        generator=fake_generator,
-        exact_match=True,
-    )
+    def test_ungrounded_model_output_uses_safe_fallback(self):
+        evidence = evidence_from_content(HTML)
+        prompts = generate_prompts(
+            evidence,
+            count=3,
+            generator=lambda instructions: ["Tell me a joke."] * len(instructions),
+            exact_match=False,
+        )
 
-    assert len(prompts) >= 3
-    assert all(candidate.exact_phrase in candidate.source_excerpt for candidate in prompts)
-    assert all(
-        f'exact phrase "{candidate.exact_phrase}"' in candidate.prompt
-        for candidate in prompts
-    )
+        self.assertTrue(prompts)
+        self.assertTrue(
+            all(item.generation_method == "template_fallback" for item in prompts)
+        )
+        self.assertTrue(all(item.prompt.endswith("?") for item in prompts))
 
+    def test_extract_exact_phrase_is_verbatim_and_bounded(self):
+        text = (
+            "Guests can book connecting family suites with private balconies "
+            "overlooking Victoria Harbour."
+        )
+        phrase = extract_exact_phrase(text)
 
-def test_ungrounded_model_output_uses_safe_fallback():
-    evidence = evidence_from_content(HTML)
-    prompts = generate_prompts(
-        evidence,
-        count=3,
-        generator=lambda instructions: ["Tell me a joke."] * len(instructions),
-        exact_match=False,
-    )
+        self.assertIn(phrase, text)
+        self.assertGreaterEqual(len(phrase.split()), 5)
+        self.assertLessEqual(len(phrase.split()), 10)
 
-    assert prompts
-    assert all(item.generation_method == "template_fallback" for item in prompts)
-    assert all(item.prompt.endswith("?") for item in prompts)
-
-
-def test_extract_exact_phrase_is_verbatim_and_bounded():
-    text = (
-        "Guests can book connecting family suites with private balconies "
-        "overlooking Victoria Harbour."
-    )
-    phrase = extract_exact_phrase(text)
-
-    assert phrase in text
-    assert 5 <= len(phrase.split()) <= 10
-
-
-def test_url_validation_rejects_private_addresses(monkeypatch):
-    monkeypatch.setattr(
-        socket,
-        "getaddrinfo",
-        lambda *args, **kwargs: [
+    def test_url_validation_rejects_private_addresses(self):
+        records = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
-        ],
-    )
+        ]
+        with patch("socket.getaddrinfo", return_value=records):
+            with self.assertRaisesRegex(PromptCreatorError, "non-public"):
+                validate_public_url("https://localhost/private")
 
-    with pytest.raises(PromptCreatorError, match="non-public"):
-        validate_public_url("https://localhost/private")
-
-
-def test_url_validation_accepts_public_addresses(monkeypatch):
-    monkeypatch.setattr(
-        socket,
-        "getaddrinfo",
-        lambda *args, **kwargs: [
+    def test_url_validation_accepts_public_addresses(self):
+        records = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
-        ],
-    )
+        ]
+        with patch("socket.getaddrinfo", return_value=records):
+            self.assertEqual(
+                validate_public_url("https://example.com/page"),
+                ["93.184.216.34"],
+            )
 
-    assert validate_public_url("https://example.com/page") == ["93.184.216.34"]
+
+if __name__ == "__main__":
+    unittest.main()

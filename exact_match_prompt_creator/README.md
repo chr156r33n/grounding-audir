@@ -56,5 +56,5 @@ mode if you want a harder, more realistic retrieval test.
 The tests use a fake generator and never download the model:
 
 ```bash
-pytest exact_match_prompt_creator/tests
+python -m unittest discover -s exact_match_prompt_creator/tests -v
 ```

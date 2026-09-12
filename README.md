@@ -9,6 +9,10 @@ This repository also contains a separate Cloudflare Workers edition in
 GitHub deployment workflow. The Worker and Streamlit deployments are parallel;
 deploying one does not replace or remove the other.
 
+A credential-free, standalone query-generation spin-off is available in
+[`exact_match_prompt_creator/`](exact_match_prompt_creator/README.md). It uses a
+small local model to create page-specific prompts for testing chatbot retrieval.
+
 ## Run locally
 
 Python 3.11+ is recommended.

@@ -20,6 +20,8 @@ const HTML = `
   </head>
   <body>
     <nav><p>This navigation sentence is deliberately long and must be ignored.</p></nav>
+    <div class="cookie-consent"><p>Accept all cookies and review our privacy policy.</p></div>
+    <section class="site-menu"><p>Home | About us | Contact us | Sign in | Subscribe</p></section>
     <main>
       <h1>Family stays beside Victoria Harbour</h1>
       <p>Guests can book connecting family suites with private balconies overlooking
@@ -39,6 +41,8 @@ test("evidenceFromContent ignores navigation and scripts", () => {
   assert.equal(evidence.title, "Harbour Hotel Hong Kong");
   assert.ok(evidence.chunks.some((chunk) => chunk.text.includes("rooftop pool")));
   assert.ok(evidence.chunks.every((chunk) => !chunk.text.includes("navigation sentence")));
+  assert.ok(evidence.chunks.every((chunk) => !chunk.text.includes("Accept all cookies")));
+  assert.ok(evidence.chunks.every((chunk) => !chunk.text.includes("Sign in")));
 });
 
 test("selectAnchorPassages prefers specific facts", () => {
@@ -46,6 +50,31 @@ test("selectAnchorPassages prefers specific facts", () => {
   const anchors = selectAnchorPassages(evidence, 4);
   assert.ok(anchors.length >= 3);
   assert.ok(anchors.some((anchor) => anchor.includes("7am until 9pm")));
+});
+
+test("selectAnchorPassages rejects generic pasted-page boilerplate", () => {
+  const evidence = evidenceFromContent(`
+Home
+
+About us
+
+Sign in
+
+Subscribe to our newsletter and follow us on social media.
+
+Accept all cookies and review our privacy policy.
+
+The Calder House Meridian Suite includes a hand-carved walnut desk, room 417,
+and a private terrace overlooking the Ashbourne Observatory.
+
+The rooftop telescope session begins at 9:15pm every Thursday and is limited
+to twelve registered guests.
+`);
+  const anchors = selectAnchorPassages(evidence, 4);
+  assert.ok(anchors.length >= 2);
+  assert.ok(anchors.some((anchor) => anchor.includes("Calder House Meridian Suite")));
+  assert.ok(anchors.some((anchor) => anchor.includes("9:15pm")));
+  assert.ok(anchors.every((anchor) => !/cookies|newsletter|sign in/i.test(anchor)));
 });
 
 test("generatePrompts builds exact-match prompts from templates", async () => {
@@ -67,7 +96,7 @@ test("generatePrompts uses chrome session when provided", async () => {
       assert.match(instruction, /Return only the question/);
       const anchor = instruction.match(/Text: (.+)\nQuestion:/)?.[1] || "";
       const phrase = extractExactPhrase(anchor, 4);
-      return `What does the page say about ${phrase}?`;
+      return `What information is available about ${phrase}?`;
     },
   });
   assert.equal(prompts[0].generationMethod, "chrome_ai");

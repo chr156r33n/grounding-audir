@@ -60,7 +60,37 @@ const STOP_WORDS = new Set([
   "your",
 ]);
 
-const MAX_CHUNKS = 12;
+const MAX_CHUNKS = 40;
+const BOILERPLATE_PATTERN =
+  /\b(?:accept (?:all )?cookies?|cookie (?:policy|settings?)|privacy policy|terms (?:and|&) conditions|sign (?:in|up)|log in|register|subscribe|newsletter|skip to content|read more|learn more|view all|see all|contact us|follow us|share (?:this|on)|add to (?:cart|basket)|open menu|close menu|search|home|back to top|all rights reserved)\b/i;
+const GENERIC_TOKENS = new Set([
+  "account",
+  "basket",
+  "blog",
+  "contact",
+  "cookie",
+  "copyright",
+  "explore",
+  "follow",
+  "help",
+  "home",
+  "learn",
+  "login",
+  "menu",
+  "more",
+  "newsletter",
+  "privacy",
+  "read",
+  "register",
+  "search",
+  "share",
+  "shop",
+  "signin",
+  "signup",
+  "social",
+  "subscribe",
+  "terms",
+]);
 
 export function evidenceFromContent(content, source = "") {
   const text = String(content || "").trim();
@@ -107,24 +137,60 @@ export function selectAnchorPassages(evidence, limit = 6) {
     li: 4,
     title: 0,
   };
-  const scored = [];
+  const passages = [];
   for (const chunk of evidence.chunks) {
     for (const sentence of sentences(chunk.text)) {
       const words = sentence.split(/\s+/);
-      if (words.length < 6 || sentence.length < 35) continue;
-      const specificity = distinctiveTokens(sentence).length;
-      let score = chunk.score + (kindBonus[chunk.kind] || 0) + Math.min(specificity * 3, 30);
-      if (/\d/.test(sentence)) score += 8;
-      if (sentence.length >= 55 && sentence.length <= 260) score += 10;
-      scored.push([score, sentence.slice(0, 420)]);
+      if (
+        words.length < 6 ||
+        sentence.length < 35 ||
+        isLikelyBoilerplate(sentence, chunk.kind)
+      ) {
+        continue;
+      }
+      const tokens = distinctiveTokens(sentence);
+      if (new Set(tokens).size < 3) continue;
+      passages.push({ chunk, sentence: sentence.slice(0, 420), tokens });
     }
   }
+
+  const documentFrequency = new Map();
+  for (const passage of passages) {
+    for (const token of new Set(passage.tokens)) {
+      documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+    }
+  }
+
+  const titleTokens = new Set(distinctiveTokens(evidence.title || ""));
+  const scored = passages.map(({ chunk, sentence, tokens }) => {
+    const uniqueTokens = new Set(tokens);
+    const rarity = [...uniqueTokens].reduce(
+      (total, token) => total + 1 / (documentFrequency.get(token) || 1),
+      0,
+    );
+    const genericCount = [...uniqueTokens].filter((token) =>
+      GENERIC_TOKENS.has(token),
+    ).length;
+    const titleOverlap = [...uniqueTokens].filter((token) =>
+      titleTokens.has(token),
+    ).length;
+    let score =
+      chunk.score +
+      (kindBonus[chunk.kind] || 0) +
+      Math.min(rarity * 5, 35) +
+      Math.min(titleOverlap * 4, 12) -
+      genericCount * 5;
+    if (/\d/.test(sentence)) score += 8;
+    if (specificNameCount(sentence) >= 2) score += 8;
+    if (sentence.length >= 55 && sentence.length <= 260) score += 10;
+    return [score, sentence];
+  });
 
   const selected = [];
   const fingerprints = [];
   for (const [, sentence] of scored.sort((a, b) => b[0] - a[0] || a[1].localeCompare(b[1]))) {
     const fingerprint = new Set(distinctiveTokens(sentence));
-    if (!fingerprint.size) continue;
+    if (fingerprint.size < 3) continue;
     const overlaps = fingerprints.some((prior) => {
       const intersection = [...fingerprint].filter((token) => prior.has(token));
       return intersection.length / Math.max(1, Math.min(fingerprint.size, prior.size)) > 0.7;
@@ -150,7 +216,9 @@ export function extractExactPhrase(text, maxWords = 10) {
       const window = words.slice(start, start + size);
       let score = 0;
       for (const word of window) {
-        if (!STOP_WORDS.has(word.toLowerCase()) && word.length > 3) score += 2;
+        const lowered = word.toLowerCase();
+        if (!STOP_WORDS.has(lowered) && word.length > 3) score += 2;
+        if (GENERIC_TOKENS.has(lowered)) score -= 3;
         if (/^[A-Z]/.test(word) || /\d/.test(word)) score += 1;
       }
       if (!best || score > best[0]) best = [score, start, size];
@@ -167,7 +235,9 @@ export function buildGenerationInstruction(anchor, title) {
   return (
     "Write one natural, standalone question that a person could ask a chatbot. " +
     "The question must be answerable from the supplied text, must ask for a specific " +
-    "fact, and must not mention a page, passage, source, URL, or these instructions. " +
+    "fact that is distinctive to this page, and must not ask about generic navigation, " +
+    "site features, cookies, or calls to action. Do not mention a page, passage, source, " +
+    "URL, or these instructions. " +
     "Return only the question.\n" +
     `${context}Text: ${anchor}\nQuestion:`
   );
@@ -186,7 +256,11 @@ export function cleanQuestion(value) {
 export function questionIsGrounded(question, anchor) {
   if (!question || question.length < 18 || question.length > 250) return false;
   const lowered = question.toLowerCase();
-  if (["this page", "the passage", "the source", "the url"].some((term) => lowered.includes(term))) {
+  if (
+    ["this page", "the page", "the passage", "the source", "the url"].some((term) =>
+      lowered.includes(term),
+    )
+  ) {
     return false;
   }
   const questionTokens = new Set(distinctiveTokens(question));
@@ -259,10 +333,11 @@ export async function generatePrompts(evidence, options) {
 }
 
 function parseHtmlEvidence(value) {
-  const withoutNoise = value.replace(
-    /<(script|style|noscript|svg|nav|footer|form|header|aside)\b[\s\S]*?<\/\1>/gi,
-    " ",
-  );
+  if (typeof DOMParser !== "undefined") {
+    return parseHtmlWithDom(value);
+  }
+
+  const withoutNoise = stripHtmlBoilerplate(value);
   const first = (pattern) => cleanText(decode(withoutNoise.match(pattern)?.[1] || "")) || null;
   const all = (pattern) =>
     [...withoutNoise.matchAll(pattern)]
@@ -294,18 +369,128 @@ function parseHtmlEvidence(value) {
 }
 
 function plainTextChunks(content) {
-  const blocks = content
-    .split(/\n\s*\n/)
-    .map(cleanText)
-    .filter((block) => block.length >= 25);
-  if (!blocks.length && cleanText(content).length >= 40) {
-    blocks.push(cleanText(content));
+  const blocks = [];
+  for (const section of content.split(/\n\s*\n/)) {
+    const lines = section.split(/\n/).map(cleanText).filter(Boolean);
+    if (lines.length <= 1) {
+      if (lines[0]) blocks.push(lines[0]);
+      continue;
+    }
+    let buffer = "";
+    for (const line of lines) {
+      if (!buffer && line.length < 25) continue;
+      buffer = cleanText(`${buffer} ${line}`);
+      if (/[.!?]$/.test(line) || buffer.length >= 300) {
+        blocks.push(buffer);
+        buffer = "";
+      }
+    }
+    if (buffer.length >= 25) blocks.push(buffer);
   }
-  return blocks.slice(0, MAX_CHUNKS).map((block, index) => ({
+  const filtered = blocks.filter(
+    (block) =>
+      block.length >= 25 &&
+      !isLikelyBoilerplate(block, block.length <= 120 ? "title" : "p"),
+  );
+  if (!filtered.length && cleanText(content).length >= 40) {
+    filtered.push(cleanText(content));
+  }
+  return filtered.slice(0, MAX_CHUNKS).map((block, index) => ({
     kind: index === 0 && block.length <= 120 ? "title" : "p",
     text: block.slice(0, 900),
     score: index === 0 && block.length <= 120 ? 100 : 50,
   }));
+}
+
+function parseHtmlWithDom(value) {
+  const document = new DOMParser().parseFromString(value, "text/html");
+  document
+    .querySelectorAll(
+      [
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "nav",
+        "footer",
+        "form",
+        "header",
+        "aside",
+        "dialog",
+        "[hidden]",
+        '[aria-hidden="true"]',
+        '[role="navigation"]',
+        '[role="banner"]',
+        '[role="contentinfo"]',
+        '[role="dialog"]',
+        '[class*="breadcrumb" i]',
+        '[class*="cookie" i]',
+        '[class*="consent" i]',
+        '[class*="footer" i]',
+        '[class*="header" i]',
+        '[class*="menu" i]',
+        '[class*="modal" i]',
+        '[class*="nav-" i]',
+        '[class*="navigation" i]',
+        '[class*="newsletter" i]',
+        '[class*="sidebar" i]',
+        '[class*="social" i]',
+        '[id*="breadcrumb" i]',
+        '[id*="cookie" i]',
+        '[id*="consent" i]',
+        '[id*="footer" i]',
+        '[id*="menu" i]',
+        '[id*="navigation" i]',
+      ].join(","),
+    )
+    .forEach((element) => element.remove());
+
+  const cleanNode = (element) => cleanText(element?.textContent || "");
+  const title = cleanNode(document.querySelector("title")) || null;
+  const description =
+    document.querySelector(
+      'meta[name="description" i], meta[property="og:description" i]',
+    )?.getAttribute("content")?.trim() || null;
+  const main =
+    document.querySelector("main, article, [role=main]") ||
+    document.body ||
+    document.documentElement;
+  const chunks = [];
+  if (title) chunks.push({ kind: "title", text: title.slice(0, 900), score: 100 });
+  if (description && !isLikelyBoilerplate(description, "meta_description")) {
+    chunks.push({
+      kind: "meta_description",
+      text: description.slice(0, 900),
+      score: 95,
+    });
+  }
+  main.querySelectorAll("h1, h2, h3, p, li").forEach((element) => {
+    const kind = element.tagName.toLowerCase();
+    const text = cleanNode(element);
+    const minimum = kind.startsWith("h") ? 12 : 40;
+    if (text.length < minimum || isLikelyBoilerplate(text, kind)) return;
+    const score =
+      kind === "h1" ? 85 : kind === "h2" ? 75 : kind === "h3" ? 65 : kind === "li" ? 35 : 40;
+    chunks.push({ kind, text: text.slice(0, 900), score });
+  });
+  return {
+    title,
+    description,
+    chunks: dedupeChunks(chunks).slice(0, MAX_CHUNKS),
+  };
+}
+
+function stripHtmlBoilerplate(value) {
+  let stripped = value.replace(
+    /<(script|style|noscript|svg|nav|footer|form|header|aside|dialog)\b[\s\S]*?<\/\1>/gi,
+    " ",
+  );
+  const noisyContainer =
+    /<(div|section|ul)\b[^>]*(?:class|id)=["'][^"']*(?:breadcrumb|cookie|consent|footer|menu|modal|nav(?:igation)?|newsletter|sidebar|social)[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi;
+  for (let pass = 0; pass < 3; pass += 1) {
+    stripped = stripped.replace(noisyContainer, " ");
+  }
+  return stripped;
 }
 
 function dedupeChunks(chunks) {
@@ -318,6 +503,34 @@ function dedupeChunks(chunks) {
     selected.push(chunk);
   }
   return selected;
+}
+
+function isLikelyBoilerplate(text, kind = "p") {
+  const cleaned = cleanText(text);
+  const words = cleaned.match(/[A-Za-z0-9][A-Za-z0-9'’/-]*/g) || [];
+  if (!words.length) return true;
+  const loweredWords = words.map((word) => word.toLowerCase());
+  const genericCount = loweredWords.filter((word) => GENERIC_TOKENS.has(word)).length;
+  const distinctiveCount = new Set(distinctiveTokens(cleaned)).size;
+
+  if (BOILERPLATE_PATTERN.test(cleaned) && words.length <= 28) return true;
+  if ((cleaned.match(/[|›»]/g) || []).length >= 3) return true;
+  if (genericCount / words.length >= 0.35) return true;
+  if (kind === "li" && words.length <= 8 && distinctiveCount < 3) return true;
+  if (
+    /^(?:welcome|discover|explore|find out|click here|get started|we use cookies)\b/i.test(
+      cleaned,
+    ) &&
+    distinctiveCount < 5
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function specificNameCount(text) {
+  const words = text.match(/\b[A-Z][A-Za-z0-9'’&/-]{2,}\b/g) || [];
+  return words.slice(1).filter((word) => !STOP_WORDS.has(word.toLowerCase())).length;
 }
 
 function distinctiveTokens(text) {

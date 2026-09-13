@@ -143,3 +143,19 @@ footer {
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
+
+footer p {
+  margin: 0;
+}
+
+.creator-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 8px;
+}
+
+.creator-links a {
+  color: var(--accent);
+  font-weight: 600;
+}

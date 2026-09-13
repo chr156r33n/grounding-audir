@@ -1,8 +1,14 @@
-# Exact Match Passage Finder — Chrome extension
+# exactly matchy — Chrome extension
 
 A standalone Manifest V3 extension that analyzes the currently rendered page,
 selects meaningful 20–30 word quotations, and creates exact-text retrieval
 prompts. It does not require the Cloudflare app or any API credentials.
+
+Created by [Chris Green](https://www.chris-green.net/). Follow Chris on
+[LinkedIn](https://www.linkedin.com/in/chrisgreenseo/),
+[X](https://x.com/chrisgreenseo),
+[Bluesky](https://bsky.app/profile/chris-green.net), and
+[YouTube](https://www.youtube.com/@ChrisGreenSEO).
 
 The extension:
 
@@ -27,7 +33,7 @@ Page content and model inference remain on the user's device.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
 4. Choose the `prompt_creator_extension` directory.
-5. Pin **Exact Match Passage Finder** if desired.
+5. Pin **exactly matchy** if desired.
 
 Open a normal web page, select the extension, and choose **Analyze this page**.
 Chrome internal pages, the Chrome Web Store, and other protected pages do not

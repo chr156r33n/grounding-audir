@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Exact Match Passage Finder",
+  "name": "exactly matchy",
   "version": "1.1.0",
   "description": "Create exact-text retrieval prompts from the rendered page.",
   "permissions": ["activeTab", "scripting"],
@@ -13,7 +13,7 @@
     }
   ],
   "action": {
-    "default_title": "Create exact-match prompts",
+    "default_title": "exactly matchy — create exact-match prompts",
     "default_popup": "popup.html"
   }
 }

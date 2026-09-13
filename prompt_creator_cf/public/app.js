@@ -156,14 +156,22 @@ $("#prompt-form").addEventListener("submit", async (event) => {
     let chromeAiUsed = false;
     const status = await getChromeAiStatus();
     if (status !== "unsupported" && status !== "unavailable") {
-      setStatus("Preparing Chrome on-device model…", "pending");
-      session = await createChromeAiSession({
-        onDownloadProgress: (loaded) => {
-          setStatus(`Downloading Chrome AI model… ${Math.round(loaded * 100)}%`, "pending");
-        },
-      });
-      setStatus("Chrome AI ready", "ready");
-      chromeAiUsed = true;
+      try {
+        setStatus("Preparing Chrome on-device model…", "pending");
+        session = await createChromeAiSession({
+          onDownloadProgress: (loaded) => {
+            setStatus(
+              `Downloading Chrome AI model… ${Math.round(loaded * 100)}%`,
+              "pending",
+            );
+          },
+        });
+        setStatus("Chrome AI ready", "ready");
+        chromeAiUsed = true;
+      } catch {
+        session = null;
+        setStatus("Chrome AI timed out — using heuristic selection", "muted");
+      }
     }
 
     const prompts = await generatePrompts(evidence, {
@@ -175,6 +183,9 @@ $("#prompt-form").addEventListener("submit", async (event) => {
           total === 1 ? "Selecting the best passages…" : "Creating prompts…";
       },
     });
+    chromeAiUsed = prompts.some(
+      (item) => item.generationMethod === "chrome_ai_selection",
+    );
 
     lastResults = { evidence, prompts, chromeAiUsed };
     renderResults(lastResults);

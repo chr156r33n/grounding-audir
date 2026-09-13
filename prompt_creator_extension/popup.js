@@ -8,9 +8,13 @@ const $ = (selector) => document.querySelector(selector);
 
 async function chromeAiSession() {
   if (!globalThis.LanguageModel) return null;
+  const languageOptions = {
+    expectedInputs: [{ type: "text", languages: ["en"] }],
+    expectedOutputs: [{ type: "text", languages: ["en"] }],
+  };
   let availability;
   try {
-    availability = await LanguageModel.availability({ languages: ["en"] });
+    availability = await LanguageModel.availability(languageOptions);
   } catch {
     return null;
   }
@@ -19,14 +23,43 @@ async function chromeAiSession() {
     availability === "available"
       ? "Chrome AI ready"
       : "Preparing Chrome on-device model…";
-  return LanguageModel.create({
-    monitor(monitor) {
-      monitor.addEventListener("downloadprogress", (event) => {
-        $("#model-status").textContent =
-          `Downloading Chrome AI… ${Math.round(event.loaded * 100)}%`;
-      });
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    return await LanguageModel.create({
+      ...languageOptions,
+      signal: controller.signal,
+      monitor(monitor) {
+        monitor.addEventListener("downloadprogress", (event) => {
+          $("#model-status").textContent =
+            `Downloading Chrome AI… ${Math.round(event.loaded * 100)}%`;
+        });
+      },
+    });
+  } catch {
+    $("#model-status").textContent =
+      "Chrome AI timed out — heuristic selection ready";
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function rankWithTimeout(session, instruction) {
+  let timeout;
+  try {
+    return await Promise.race([
+      session.prompt(instruction),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Chrome AI selection timed out.")),
+          12_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function extractRenderedEvidence() {
@@ -143,10 +176,13 @@ $("#analyze").addEventListener("click", async () => {
     const prompts = await generatePrompts(evidence, {
       count: Number($("#count").value || 5),
       session,
-      rankPassages: async (model, instruction) => model.prompt(instruction),
+      rankPassages: rankWithTimeout,
     });
-    render(prompts, evidence, !!session);
-    $("#model-status").textContent = session
+    const usedChromeAi = prompts.some(
+      (item) => item.generationMethod === "chrome_ai_selection",
+    );
+    render(prompts, evidence, usedChromeAi);
+    $("#model-status").textContent = usedChromeAi
       ? "Chrome AI ready"
       : "Chrome AI unavailable — heuristic selection used";
   } catch (error) {

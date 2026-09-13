@@ -8,6 +8,13 @@ Prompt API (Gemini Nano) helps phrase the questions. Otherwise the app falls bac
 to grounded templates. No API keys, hosted LLM calls, or dynamic Worker endpoints
 are required. Pasted content never leaves the visitor's browser.
 
+The evidence selector removes semantic and class-labelled navigation, headers,
+footers, cookie banners, menus, sidebars, and calls to action. It rejects generic
+passages and prioritises facts containing rare in-page vocabulary, names, numbers,
+and terms related to the page title. This strongly favours page-specific evidence,
+although uniqueness across the wider web cannot be proven without an external
+corpus or search service.
+
 This app is independent from the main Grounding Source Observatory Worker in
 `cloudflare/`. Deploy it to its own Worker name and custom domain.
 

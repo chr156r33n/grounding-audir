@@ -6,6 +6,7 @@ import {
   evidenceFromContent,
   extractExactPhrase,
   generatePrompts,
+  promptListText,
   questionIsGrounded,
   selectAnchorPassages,
 } from "../public/generator.js";
@@ -84,6 +85,23 @@ test("generatePrompts builds exact-match prompts from templates", async () => {
   assert.ok(
     prompts.every((item) => item.prompt.includes(`exact phrase "${item.exactPhrase}"`)),
   );
+});
+
+test("promptListText returns prompts without evidence or labels", () => {
+  const text = promptListText([
+    {
+      prompt: "First generated prompt?",
+      exactPhrase: "private evidence one",
+      sourceExcerpt: "Supporting copy one",
+    },
+    {
+      prompt: "Second generated prompt?",
+      exactPhrase: "private evidence two",
+      sourceExcerpt: "Supporting copy two",
+    },
+  ]);
+  assert.equal(text, "First generated prompt?\n\nSecond generated prompt?");
+  assert.doesNotMatch(text, /Supporting|private evidence/);
 });
 
 test("generatePrompts uses chrome session when provided", async () => {

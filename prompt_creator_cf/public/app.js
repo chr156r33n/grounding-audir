@@ -4,7 +4,11 @@ import {
   getChromeAiStatus,
   promptChromeAi,
 } from "./chrome-ai.js";
-import { evidenceFromContent, generatePrompts } from "./generator.js";
+import {
+  evidenceFromContent,
+  generatePrompts,
+  promptListText,
+} from "./generator.js";
 
 const $ = (selector) => document.querySelector(selector);
 let lastResults = null;
@@ -77,7 +81,18 @@ function renderResults(result) {
     `${result.prompts.length} prompts · ` +
     `${result.chromeAiUsed ? "Chrome AI used where available" : "Templates only"}`;
 
-  const textExport = result.prompts.map((item, index) => `${index + 1}. ${item.prompt}`).join("\n\n");
+  const plainPromptList = promptListText(result.prompts);
+  const copyAllButton = $("#copy-all");
+  copyAllButton.onclick = async () => {
+    await navigator.clipboard.writeText(plainPromptList);
+    copyAllButton.textContent = "All prompts copied";
+    setTimeout(() => {
+      copyAllButton.textContent = "Copy all prompts";
+    }, 1500);
+  };
+  const textExport = result.prompts
+    .map((item, index) => `${index + 1}. ${item.prompt}`)
+    .join("\n\n");
   $("#download-txt").onclick = () => downloadBlob(textExport, "exact-match-prompts.txt", "text/plain");
   $("#download-json").onclick = () =>
     downloadBlob(

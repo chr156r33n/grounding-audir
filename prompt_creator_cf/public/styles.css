@@ -184,6 +184,11 @@ fieldset legend {
   color: var(--ink);
 }
 
+.download-row .primary-action {
+  background: var(--accent);
+  color: #fff;
+}
+
 .prompt-list {
   display: grid;
   gap: 1rem;

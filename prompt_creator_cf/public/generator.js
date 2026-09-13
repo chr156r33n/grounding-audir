@@ -287,6 +287,10 @@ export function buildPromptCandidate(anchor, question, method, exactMatch) {
   };
 }
 
+export function promptListText(prompts) {
+  return prompts.map((item) => item.prompt).join("\n\n");
+}
+
 export async function generatePrompts(evidence, options) {
   const count = Math.max(3, Math.min(Number(options.count || 5), 8));
   const exactMatch = options.exactMatch !== false;

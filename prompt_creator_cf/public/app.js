@@ -5,6 +5,7 @@ import {
   promptChromeAi,
 } from "./chrome-ai.js";
 import {
+  chatbotLinks,
   evidenceFromContent,
   generatePrompts,
   promptListText,
@@ -48,13 +49,23 @@ function renderResults(result) {
             <span class="method-pill">${escapeHtml(item.generationMethod.replace(/_/g, " "))}</span>
           </div>
           <pre class="prompt-text">${escapeHtml(item.prompt)}</pre>
+          <div class="chatbot-links">
+            ${chatbotLinks(item.prompt)
+              .map(
+                (link) => `
+                  <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">
+                    ${escapeHtml(link.name)}
+                  </a>`,
+              )
+              .join("")}
+          </div>
           <details>
-            <summary>Why this prompt is grounded</summary>
+            <summary>Why this passage was selected</summary>
             <dl>
-              <dt>Exact phrase</dt>
-              <dd>${escapeHtml(item.exactPhrase)}</dd>
-              <dt>Supporting copy</dt>
-              <dd>${escapeHtml(item.sourceExcerpt)}</dd>
+              <dt>Quoted passage</dt>
+              <dd>${escapeHtml(item.passage)}</dd>
+              <dt>Supporting page text</dt>
+              <dd>${escapeHtml(item.supportingText)}</dd>
             </dl>
           </details>
           <button type="button" class="copy-button" data-prompt="${encodeURIComponent(item.prompt)}">
@@ -76,10 +87,9 @@ function renderResults(result) {
   });
 
   $("#results-meta").textContent =
-    `${result.exactMatch ? "Exact-match" : "Natural-language"} mode · ` +
     `${result.evidence.title || result.evidence.source} · ` +
     `${result.prompts.length} prompts · ` +
-    `${result.chromeAiUsed ? "Chrome AI used where available" : "Templates only"}`;
+    `${result.chromeAiUsed ? "Chrome AI selection" : "Heuristic selection"}`;
 
   const plainPromptList = promptListText(result.prompts);
   const copyAllButton = $("#copy-all");
@@ -100,7 +110,6 @@ function renderResults(result) {
         {
           source: result.evidence.source,
           title: result.evidence.title,
-          exactMatch: result.exactMatch,
           prompts: result.prompts,
         },
         null,
@@ -142,7 +151,6 @@ $("#prompt-form").addEventListener("submit", async (event) => {
     const formData = new FormData(event.currentTarget);
     const evidence = loadEvidence(formData);
     const count = Number(formData.get("count") || 5);
-    const exactMatch = formData.get("exact-match") === "on";
 
     let session = null;
     let chromeAiUsed = false;
@@ -160,15 +168,15 @@ $("#prompt-form").addEventListener("submit", async (event) => {
 
     const prompts = await generatePrompts(evidence, {
       count,
-      exactMatch,
       session,
-      generateQuestion: promptChromeAi,
-      onProgress: ({ index, total }) => {
-        button.textContent = `Creating prompts… ${index + 1}/${total}`;
+      rankPassages: promptChromeAi,
+      onProgress: ({ total }) => {
+        button.textContent =
+          total === 1 ? "Selecting the best passages…" : "Creating prompts…";
       },
     });
 
-    lastResults = { evidence, prompts, exactMatch, chromeAiUsed };
+    lastResults = { evidence, prompts, chromeAiUsed };
     renderResults(lastResults);
   } catch (caught) {
     error.textContent = caught.message;

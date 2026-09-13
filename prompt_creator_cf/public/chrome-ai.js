@@ -16,7 +16,7 @@ export function chromeAiLabel(status) {
     case "downloading":
       return "Chrome AI downloading";
     case "unsupported":
-      return "Chrome AI unavailable — templates only";
+      return "Chrome AI unavailable — heuristic selection";
     default:
       return "Chrome AI unavailable on this device";
   }

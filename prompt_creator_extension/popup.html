@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exact Match Passage Finder</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <p class="eyebrow">Rendered-page retrieval probe</p>
+      <h1>Exact Match Passage Finder</h1>
+      <p id="model-status" class="status">Checking Chrome AI…</p>
+    </header>
+
+    <main>
+      <label>
+        Prompts
+        <input id="count" type="number" min="3" max="8" value="5" />
+      </label>
+      <button id="analyze" class="primary" type="button">Analyze this page</button>
+      <p id="error" class="error" role="alert"></p>
+
+      <section id="results" hidden>
+        <div class="results-heading">
+          <h2>Selected passages</h2>
+          <button id="copy-all" type="button">Copy all</button>
+        </div>
+        <p id="page-title" class="muted"></p>
+        <div id="prompt-list"></div>
+      </section>
+    </main>
+
+    <footer>
+      Page text and model selection stay on this device. Gemini opens Guided
+      Learning because standard Gemini does not reliably prefill prompts from URLs.
+    </footer>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

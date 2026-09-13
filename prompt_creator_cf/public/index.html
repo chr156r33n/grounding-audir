@@ -24,8 +24,8 @@
         <p>
           Paste page copy and turn it into prompts you can use to test whether a
           chatbot's retrieval layer can surface your content. Everything stays in
-          your browser. Chrome on-device AI helps phrase the questions when available;
-          otherwise the app uses grounded templates.
+          your browser. Chrome on-device AI selects the most meaningful, page-specific
+          passages when available; otherwise the app uses deterministic scoring.
         </p>
       </section>
 
@@ -50,14 +50,10 @@
             <span>Number of prompts</span>
             <input name="count" type="number" min="3" max="8" value="5" />
           </label>
-          <label class="checkbox">
-            <input name="exact-match" type="checkbox" checked />
-            <span>Exact-match mode</span>
-          </label>
         </div>
         <p class="hint">
-          Exact-match mode appends a short verbatim phrase from your page. Disable it
-          for more natural, less-leading questions.
+          Each prompt contains an unchanged 20–30 word quotation and asks the chatbot
+          to retrieve a page containing that exact text.
         </p>
 
         <p id="form-error" class="error" role="alert"></p>
@@ -85,6 +81,8 @@
           <li>Chrome on-device AI works in supported desktop Chrome builds. Other browsers use templates only.</li>
           <li>The model downloads once in Chrome; this app does not call a hosted LLM API.</li>
           <li>Your pasted page content never leaves the browser.</li>
+          <li>Chatbot links open a new tab with the prompt prefilled where supported; sign-in or manual submission may still be required.</li>
+          <li>The Gemini link uses Guided Learning because its standard chat route does not reliably support prompt-prefill URLs.</li>
           <li>A missing chatbot result does not prove your page is absent from its index.</li>
         </ul>
       </section>

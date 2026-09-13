@@ -13,7 +13,9 @@ A credential-free, standalone query-generation spin-off is available in
 [`exact_match_prompt_creator/`](exact_match_prompt_creator/README.md) for local
 Streamlit use, and as a separate Cloudflare app in
 [`prompt_creator_cf/`](prompt_creator_cf/README.md) that uses Chrome on-device
-AI in the browser with template fallback.
+AI in the browser with template fallback. A standalone rendered-page workflow is
+also available as an unpacked Chrome extension in
+[`prompt_creator_extension/`](prompt_creator_extension/README.md).
 
 ## Run locally
 

@@ -10,8 +10,10 @@ GitHub deployment workflow. The Worker and Streamlit deployments are parallel;
 deploying one does not replace or remove the other.
 
 A credential-free, standalone query-generation spin-off is available in
-[`exact_match_prompt_creator/`](exact_match_prompt_creator/README.md). It uses a
-small local model to create page-specific prompts for testing chatbot retrieval.
+[`exact_match_prompt_creator/`](exact_match_prompt_creator/README.md) for local
+Streamlit use, and as a separate Cloudflare app in
+[`prompt_creator_cf/`](prompt_creator_cf/README.md) that uses Chrome on-device
+AI in the browser with template fallback.
 
 ## Run locally
 

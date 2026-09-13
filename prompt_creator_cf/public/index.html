@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Create exact-match retrieval prompts from your page content using Chrome on-device AI or templates."
+    />
+    <title>Exact Match Prompt Creator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="shell header">
+      <div>
+        <p class="eyebrow">RAG retrieval probe</p>
+        <h1>Exact Match Prompt Creator</h1>
+      </div>
+      <div id="model-status" class="status-badge" data-tone="muted">Checking Chrome AI…</div>
+    </header>
+
+    <main class="shell">
+      <section class="intro panel">
+        <p>
+          Turn a page into prompts you can paste into a chatbot to test whether its
+          retrieval layer can surface your content. Generation runs in your browser.
+          When Chrome on-device AI is available, it helps phrase the questions.
+          Otherwise the app falls back to grounded templates.
+        </p>
+      </section>
+
+      <form id="prompt-form" class="panel">
+        <fieldset class="mode-fieldset">
+          <legend>Content source</legend>
+          <label class="radio">
+            <input type="radio" name="input-mode" value="paste" checked />
+            <span>Paste HTML or visible copy</span>
+          </label>
+          <label class="radio">
+            <input type="radio" name="input-mode" value="url" />
+            <span>Fetch a public page URL</span>
+          </label>
+        </fieldset>
+
+        <label>
+          <span>Page URL</span>
+          <input
+            id="source-url"
+            name="source-url"
+            type="url"
+            placeholder="https://example.com/page-to-test"
+          />
+          <small>Optional when pasting copy. Required when fetching a URL.</small>
+        </label>
+
+        <label>
+          <span>Page HTML or visible copy</span>
+          <textarea
+            id="page-content"
+            name="page-content"
+            rows="10"
+            placeholder="Paste several paragraphs from the page…"
+          ></textarea>
+        </label>
+
+        <div class="field-grid">
+          <label>
+            <span>Number of prompts</span>
+            <input name="count" type="number" min="3" max="8" value="5" />
+          </label>
+          <label class="checkbox">
+            <input name="exact-match" type="checkbox" checked />
+            <span>Exact-match mode</span>
+          </label>
+        </div>
+        <p class="hint">
+          Exact-match mode appends a short verbatim phrase from your page. Disable it
+          for more natural, less-leading questions.
+        </p>
+
+        <p id="form-error" class="error" role="alert"></p>
+        <button id="generate-button" type="submit">Create prompts</button>
+      </form>
+
+      <section id="results" class="panel" hidden>
+        <div class="results-head">
+          <div>
+            <h2>Prompts</h2>
+            <p id="results-meta" class="muted"></p>
+          </div>
+          <div class="download-row">
+            <button id="download-txt" type="button">Download .txt</button>
+            <button id="download-json" type="button">Download .json</button>
+          </div>
+        </div>
+        <div id="prompt-list" class="prompt-list"></div>
+      </section>
+
+      <section class="panel notes">
+        <h2>Notes</h2>
+        <ul>
+          <li>Chrome on-device AI works in supported desktop Chrome builds. Other browsers use templates only.</li>
+          <li>The model downloads once in Chrome; this app does not call a hosted LLM API.</li>
+          <li>A missing chatbot result does not prove your page is absent from its index.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

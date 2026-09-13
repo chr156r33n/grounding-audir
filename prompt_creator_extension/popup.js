@@ -5,6 +5,7 @@ import {
 } from "./generator.js";
 
 const $ = (selector) => document.querySelector(selector);
+const CACHE_KEY = "latestPromptResults";
 
 async function chromeAiSession() {
   if (!globalThis.LanguageModel) return null;
@@ -125,10 +126,11 @@ async function extractRenderedEvidence() {
   return result;
 }
 
-function render(prompts, evidence, usedChromeAi) {
+function render(prompts, evidence, usedChromeAi, restored = false) {
   $("#page-title").textContent =
     `${evidence.title || evidence.source} · ` +
-    `${usedChromeAi ? "Chrome AI selection" : "heuristic selection"}`;
+    `${usedChromeAi ? "Chrome AI selection" : "heuristic selection"}` +
+    `${restored ? " · restored" : ""}`;
   $("#prompt-list").innerHTML = prompts
     .map(
       (item, index) => `
@@ -163,6 +165,39 @@ function render(prompts, evidence, usedChromeAi) {
   $("#results").hidden = false;
 }
 
+async function cacheResults(prompts, evidence, usedChromeAi) {
+  try {
+    await chrome.storage.session.set({
+      [CACHE_KEY]: {
+        prompts,
+        evidence: {
+          source: evidence.source,
+          title: evidence.title,
+        },
+        usedChromeAi,
+        count: Number($("#count").value || 5),
+      },
+    });
+  } catch {
+    // Results still work if session storage is unavailable.
+  }
+}
+
+async function restoreCachedResults() {
+  try {
+    const cached = (await chrome.storage.session.get(CACHE_KEY))[CACHE_KEY];
+    if (!cached || !Array.isArray(cached.prompts) || !cached.prompts.length) {
+      return false;
+    }
+    $("#count").value = cached.count || cached.prompts.length;
+    render(cached.prompts, cached.evidence, Boolean(cached.usedChromeAi), true);
+    $("#model-status").textContent = "Results restored from this browser session";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 $("#analyze").addEventListener("click", async () => {
   const button = $("#analyze");
   $("#error").textContent = "";
@@ -182,6 +217,7 @@ $("#analyze").addEventListener("click", async () => {
       (item) => item.generationMethod === "chrome_ai_selection",
     );
     render(prompts, evidence, usedChromeAi);
+    await cacheResults(prompts, evidence, usedChromeAi);
     $("#model-status").textContent = usedChromeAi
       ? "Chrome AI ready"
       : "Chrome AI unavailable — heuristic selection used";
@@ -190,7 +226,7 @@ $("#analyze").addEventListener("click", async () => {
       error?.message || "The current page could not be analyzed.";
   } finally {
     button.disabled = false;
-    button.textContent = "Analyze this page";
+    button.textContent = "Select test passages";
   }
 });
 
@@ -205,3 +241,5 @@ function escapeHtml(value) {
 $("#model-status").textContent = globalThis.LanguageModel
   ? "Chrome AI available"
   : "Chrome AI unavailable — heuristic fallback ready";
+
+restoreCachedResults();

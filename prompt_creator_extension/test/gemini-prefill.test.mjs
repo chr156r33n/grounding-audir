@@ -7,6 +7,7 @@ test("manifest limits persistent page access to Gemini", async () => {
   const manifest = JSON.parse(
     await readFile(new URL("../manifest.json", import.meta.url), "utf8"),
   );
+  assert.ok(manifest.permissions.includes("storage"));
   assert.deepEqual(manifest.host_permissions, ["https://gemini.google.com/*"]);
   assert.deepEqual(
     manifest.content_scripts[0].matches,

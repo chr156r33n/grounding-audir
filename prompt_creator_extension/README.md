@@ -1,8 +1,14 @@
-# Exact Match Passage Finder — Chrome extension
+# exactly matchy — Chrome extension
 
 A standalone Manifest V3 extension that analyzes the currently rendered page,
 selects meaningful 20–30 word quotations, and creates exact-text retrieval
 prompts. It does not require the Cloudflare app or any API credentials.
+
+Created by [Chris Green](https://www.chris-green.net/). Follow Chris on
+[LinkedIn](https://www.linkedin.com/in/chrisgreenseo/),
+[X](https://x.com/chrisgreenseo),
+[Bluesky](https://bsky.app/profile/chris-green.net), and
+[YouTube](https://www.youtube.com/@ChrisGreenSEO).
 
 The extension:
 
@@ -20,6 +26,10 @@ places its prompt in Gemini's conversation box, removes the parameter from the
 address bar, and leaves submission to the user.
 
 Page content and model inference remain on the user's device.
+The latest generated prompts are cached in Chrome's in-memory session storage.
+When a chatbot link closes the popup, reopening **exactly matchy** restores those
+results without analyzing the page again. The cache is discarded when the
+browser session ends.
 
 ## Install unpacked
 
@@ -27,7 +37,7 @@ Page content and model inference remain on the user's device.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
 4. Choose the `prompt_creator_extension` directory.
-5. Pin **Exact Match Passage Finder** if desired.
+5. Pin **exactly matchy** if desired.
 
 Open a normal web page, select the extension, and choose **Analyze this page**.
 Chrome internal pages, the Chrome Web Store, and other protected pages do not
@@ -37,6 +47,7 @@ allow extension DOM access.
 
 - `activeTab`: temporary access to the page the user explicitly analyzes
 - `scripting`: execute the rendered-DOM extraction function
+- `storage`: retain the latest prompt results for the current browser session
 - `https://gemini.google.com/*`: transfer a `?q=` prompt into Gemini's composer
 
 There are no other persistent host permissions, background services, analytics,

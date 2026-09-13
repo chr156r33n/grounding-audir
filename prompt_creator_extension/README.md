@@ -6,13 +6,13 @@ prompts. It does not require the Cloudflare app or any API credentials.
 
 Created by [Chris Green](https://www.chris-green.net/). Follow Chris on
 [LinkedIn](https://www.linkedin.com/in/chrisgreenseo/),
-[X](https://x.com/chrisgreenseo),
-[Bluesky](https://bsky.app/profile/chris-green.net), and
+[Bluesky](https://bsky.app/profile/chris-green.net),
+[Substack](https://chrisgreenseo.substack.com/), and
 [YouTube](https://www.youtube.com/@ChrisGreenSEO).
 
 The extension:
 
-1. runs only when the user opens the extension and selects **Analyze this page**;
+1. runs only when the user opens the extension and selects **Select test passages**;
 2. reads visible headings, paragraphs, and list items from the rendered DOM;
 3. excludes navigation, menus, headers, footers, cookie banners, sidebars, hidden
    elements, and calls to action;
@@ -39,7 +39,7 @@ browser session ends.
 4. Choose the `prompt_creator_extension` directory.
 5. Pin **exactly matchy** if desired.
 
-Open a normal web page, select the extension, and choose **Analyze this page**.
+Open a normal web page, select the extension, and choose **Select test passages**.
 Chrome internal pages, the Chrome Web Store, and other protected pages do not
 allow extension DOM access.
 

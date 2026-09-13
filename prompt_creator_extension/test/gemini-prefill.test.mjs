@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -14,6 +14,20 @@ test("manifest limits persistent page access to Gemini", async () => {
     ["https://gemini.google.com/*"],
   );
   assert.deepEqual(manifest.content_scripts[0].js, ["gemini-prefill.js"]);
+  await Promise.all(
+    Object.values(manifest.icons).map((path) =>
+      access(new URL(`../${path}`, import.meta.url)),
+    ),
+  );
+});
+
+test("popup links to Substack but not X", async () => {
+  const popup = await readFile(
+    new URL("../popup.html", import.meta.url),
+    "utf8",
+  );
+  assert.match(popup, /https:\/\/chrisgreenseo\.substack\.com\//);
+  assert.doesNotMatch(popup, /https:\/\/x\.com\//);
 });
 
 test("Gemini prefill reads q and prompt parameters safely", async () => {

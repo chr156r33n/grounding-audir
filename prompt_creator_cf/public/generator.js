@@ -299,8 +299,8 @@ export function chatbotLinks(prompt) {
     },
     {
       id: "gemini",
-      name: "Open in Gemini",
-      url: `https://gemini.google.com/guided-learning?query=${encoded}`,
+      name: "Open in Gemini (extension)",
+      url: `https://gemini.google.com/app?q=${encoded}`,
     },
   ];
 }

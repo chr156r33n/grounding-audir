@@ -21,10 +21,11 @@ Each result contains an unchanged 20–30 word quotation in this format:
 "Exact words from the pasted page" please retrieve a web page with this exact text
 ```
 
-Results link directly to ChatGPT (`?q=`), Claude (`/new?q=`), and Gemini Guided
-Learning (`?query=`). These are convenience deep links: the user may need to sign
-in or submit the prefilled prompt manually. Standard Gemini chat does not reliably
-support URL prompt prefilling, so the app uses its Guided Learning route.
+Results link directly to ChatGPT (`?q=`), Claude (`/new?q=`), and standard
+Gemini (`/app?q=`). These are convenience deep links: the user may need to sign
+in or submit the prefilled prompt manually. Gemini does not natively transfer the
+parameter into its composer reliably, so that link requires the companion
+extension in `prompt_creator_extension/`.
 
 This app is independent from the main Grounding Source Observatory Worker in
 `cloudflare/`. Deploy it to its own Worker name and custom domain.

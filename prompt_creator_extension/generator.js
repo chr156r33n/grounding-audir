@@ -188,7 +188,7 @@ export function chatbotLinks(prompt) {
     { name: "Claude", url: `https://claude.ai/new?q=${encoded}` },
     {
       name: "Gemini",
-      url: `https://gemini.google.com/guided-learning?query=${encoded}`,
+      url: `https://gemini.google.com/app?q=${encoded}`,
     },
   ];
 }

@@ -78,5 +78,6 @@ test("chatbotLinks encode complete prompts", () => {
   const links = chatbotLinks(prompt);
   assert.equal(new URL(links[0].url).searchParams.get("q"), prompt);
   assert.equal(new URL(links[1].url).searchParams.get("q"), prompt);
-  assert.equal(new URL(links[2].url).searchParams.get("query"), prompt);
+  assert.equal(new URL(links[2].url).pathname, "/app");
+  assert.equal(new URL(links[2].url).searchParams.get("q"), prompt);
 });

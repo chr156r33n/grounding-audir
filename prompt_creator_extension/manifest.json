@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "exactly matchy",
-  "version": "1.2.0",
-  "description": "Create exact-text retrieval prompts from the rendered page.",
+  "version": "1.3.0",
+  "description": "Create exact-match prompts from page text to check whether AI chatbots can retrieve and attribute the page.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://gemini.google.com/*"],
   "content_scripts": [

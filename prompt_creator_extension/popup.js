@@ -226,7 +226,7 @@ $("#analyze").addEventListener("click", async () => {
       error?.message || "The current page could not be analyzed.";
   } finally {
     button.disabled = false;
-    button.textContent = "Analyze this page";
+    button.textContent = "Select test passages";
   }
 });
 

@@ -61,6 +61,8 @@ const STOP_WORDS = new Set([
 ]);
 
 const MAX_CHUNKS = 40;
+const MIN_QUOTE_WORDS = 20;
+const MAX_QUOTE_WORDS = 30;
 const BOILERPLATE_PATTERN =
   /\b(?:accept (?:all )?cookies?|cookie (?:policy|settings?)|privacy policy|terms (?:and|&) conditions|sign (?:in|up)|log in|register|subscribe|newsletter|skip to content|read more|learn more|view all|see all|contact us|follow us|share (?:this|on)|add to (?:cart|basket)|open menu|close menu|search|home|back to top|all rights reserved)\b/i;
 const GENERIC_TOKENS = new Set([
@@ -127,7 +129,7 @@ export function evidenceFromContent(content, source = "") {
   };
 }
 
-export function selectAnchorPassages(evidence, limit = 6) {
+export function selectQuotablePassages(evidence, limit = 15) {
   const kindBonus = {
     meta_description: 35,
     h1: 30,
@@ -139,18 +141,16 @@ export function selectAnchorPassages(evidence, limit = 6) {
   };
   const passages = [];
   for (const chunk of evidence.chunks) {
-    for (const sentence of sentences(chunk.text)) {
-      const words = sentence.split(/\s+/);
-      if (
-        words.length < 6 ||
-        sentence.length < 35 ||
-        isLikelyBoilerplate(sentence, chunk.kind)
-      ) {
-        continue;
-      }
-      const tokens = distinctiveTokens(sentence);
+    for (const passage of quotableSegments(chunk.text)) {
+      if (isLikelyBoilerplate(passage, chunk.kind)) continue;
+      const tokens = distinctiveTokens(passage);
       if (new Set(tokens).size < 3) continue;
-      passages.push({ chunk, sentence: sentence.slice(0, 420), tokens });
+      passages.push({
+        chunk,
+        passage,
+        supportingText: chunk.text.slice(0, 600),
+        tokens,
+      });
     }
   }
 
@@ -162,7 +162,7 @@ export function selectAnchorPassages(evidence, limit = 6) {
   }
 
   const titleTokens = new Set(distinctiveTokens(evidence.title || ""));
-  const scored = passages.map(({ chunk, sentence, tokens }) => {
+  const scored = passages.map(({ chunk, passage, supportingText, tokens }) => {
     const uniqueTokens = new Set(tokens);
     const rarity = [...uniqueTokens].reduce(
       (total, token) => total + 1 / (documentFrequency.get(token) || 1),
@@ -180,38 +180,43 @@ export function selectAnchorPassages(evidence, limit = 6) {
       Math.min(rarity * 5, 35) +
       Math.min(titleOverlap * 4, 12) -
       genericCount * 5;
-    if (/\d/.test(sentence)) score += 8;
-    if (specificNameCount(sentence) >= 2) score += 8;
-    if (sentence.length >= 55 && sentence.length <= 260) score += 10;
-    return [score, sentence];
+    if (/\d/.test(passage)) score += 8;
+    if (specificNameCount(passage) >= 2) score += 8;
+    return { score, passage, supportingText };
   });
 
   const selected = [];
   const fingerprints = [];
-  for (const [, sentence] of scored.sort((a, b) => b[0] - a[0] || a[1].localeCompare(b[1]))) {
-    const fingerprint = new Set(distinctiveTokens(sentence));
+  for (const candidate of scored.sort(
+    (a, b) => b.score - a.score || a.passage.localeCompare(b.passage),
+  )) {
+    const fingerprint = new Set(distinctiveTokens(candidate.passage));
     if (fingerprint.size < 3) continue;
     const overlaps = fingerprints.some((prior) => {
       const intersection = [...fingerprint].filter((token) => prior.has(token));
       return intersection.length / Math.max(1, Math.min(fingerprint.size, prior.size)) > 0.7;
     });
     if (overlaps) continue;
-    selected.push(sentence);
+    selected.push(candidate);
     fingerprints.push(fingerprint);
     if (selected.length >= limit) break;
   }
   return selected;
 }
 
-export function extractExactPhrase(text, maxWords = 10) {
+export function extractQuoteWindow(text) {
   const matches = [...text.matchAll(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g)];
-  if (!matches.length) return cleanText(text).slice(0, 100);
+  if (matches.length < MIN_QUOTE_WORDS) return null;
+  if (matches.length <= MAX_QUOTE_WORDS) {
+    return text.slice(
+      matches[0].index,
+      matches[matches.length - 1].index + matches[matches.length - 1][0].length,
+    );
+  }
 
   const words = matches.map((match) => match[0]);
   let best = null;
-  const windowSize = Math.min(maxWords, words.length);
-  const minimum = Math.min(5, windowSize);
-  for (let size = windowSize; size >= minimum; size -= 1) {
+  for (let size = MAX_QUOTE_WORDS; size >= MIN_QUOTE_WORDS; size -= 1) {
     for (let start = 0; start <= words.length - size; start += 1) {
       const window = words.slice(start, start + size);
       let score = 0;
@@ -221,115 +226,118 @@ export function extractExactPhrase(text, maxWords = 10) {
         if (GENERIC_TOKENS.has(lowered)) score -= 3;
         if (/^[A-Z]/.test(word) || /\d/.test(word)) score += 1;
       }
+      const before = start === 0 ? "" : text.slice(0, matches[start].index).trimEnd();
+      const endMatch = matches[start + size - 1];
+      const after = text.slice(endMatch.index + endMatch[0].length).trimStart();
+      if (!before || /[.!?]["')\]]?$/.test(before)) score += 12;
+      if (!after || /^[.!?]["')\]]?/.test(after)) score += 12;
       if (!best || score > best[0]) best = [score, start, size];
     }
-    if (best && best[0] >= size) break;
   }
   const start = best?.[1] ?? 0;
-  const size = best?.[2] ?? windowSize;
-  return text.slice(matches[start].index, matches[start + size - 1].index + matches[start + size - 1][0].length);
-}
-
-export function buildGenerationInstruction(anchor, title) {
-  const context = title ? `Page title: ${title}\n` : "";
-  return (
-    "Write one natural, standalone question that a person could ask a chatbot. " +
-    "The question must be answerable from the supplied text, must ask for a specific " +
-    "fact that is distinctive to this page, and must not ask about generic navigation, " +
-    "site features, cookies, or calls to action. Do not mention a page, passage, source, " +
-    "URL, or these instructions. " +
-    "Return only the question.\n" +
-    `${context}Text: ${anchor}\nQuestion:`
+  const size = best?.[2] ?? MAX_QUOTE_WORDS;
+  return text.slice(
+    matches[start].index,
+    matches[start + size - 1].index + matches[start + size - 1][0].length,
   );
 }
 
-export function cleanQuestion(value) {
-  let text = cleanText(String(value || ""));
-  text = text.replace(/^(?:question|query|prompt)\s*:\s*/i, "").trim();
-  text = text.replace(/^["'`]+|["'`]+$/g, "");
-  if (!text) return "";
-  const first = text.split(/(?<=\?)\s+/)[0];
-  const trimmed = first.length > 240 ? first.slice(0, 240).replace(/\s+\S*$/, "") : first;
-  return trimmed.endsWith("?") ? trimmed : `${trimmed.replace(/[.!]+$/, "")}?`;
+export function buildPassageSelectionInstruction(candidates, title, count) {
+  return `Select the ${count} most meaningful, page-specific quotations below.
+Prefer concrete facts, distinctive names, numbers, products, places, or claims that
+are likely to identify this exact page. Reject navigation, calls to action, generic
+marketing language, cookie text, and ambiguous statements. Do not rewrite any text.
+Return JSON only in the form {"ids":[0,1]} ordered best first.
+
+Page title: ${title || "Unknown"}
+Candidates:
+${JSON.stringify(candidates.map((item, id) => ({ id, text: item.passage })))}`;
 }
 
-export function questionIsGrounded(question, anchor) {
-  if (!question || question.length < 18 || question.length > 250) return false;
-  const lowered = question.toLowerCase();
-  if (
-    ["this page", "the page", "the passage", "the source", "the url"].some((term) =>
-      lowered.includes(term),
-    )
-  ) {
-    return false;
+export function parsePassageSelection(value, candidateCount) {
+  let text = String(value || "").trim();
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  let ids = [];
+  try {
+    const parsed = JSON.parse(text);
+    ids = Array.isArray(parsed) ? parsed : parsed?.ids;
+  } catch {
+    const match = text.match(/\[[\d,\s]+\]/);
+    if (match) ids = JSON.parse(match[0]);
   }
-  const questionTokens = new Set(distinctiveTokens(question));
-  const anchorTokens = new Set(distinctiveTokens(anchor));
-  return [...questionTokens].some((token) => anchorTokens.has(token));
+  if (!Array.isArray(ids)) return [];
+  return [...new Set(ids)]
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id >= 0 && id < candidateCount);
 }
 
-export function fallbackQuestion(anchor, title) {
-  const phrase = extractExactPhrase(anchor, 8);
-  if (title) return `What does ${title.slice(0, 100)} say about ${phrase}?`;
-  return `What publicly available information explains ${phrase}?`;
-}
-
-export function buildPromptCandidate(anchor, question, method, exactMatch) {
-  const phrase = extractExactPhrase(anchor);
-  const prompt = exactMatch
-    ? `${question} Base your answer on content containing the exact phrase "${phrase}".`
-    : question;
+export function buildPromptCandidate(candidate, method) {
   return {
-    prompt,
-    exactPhrase: phrase,
-    sourceExcerpt: anchor,
+    prompt: `"${candidate.passage}" please retrieve a web page with this exact text`,
+    passage: candidate.passage,
+    supportingText: candidate.supportingText,
     generationMethod: method,
   };
 }
 
+export function promptListText(prompts) {
+  return prompts.map((item) => item.prompt).join("\n\n");
+}
+
+export function chatbotLinks(prompt) {
+  const encoded = encodeURIComponent(prompt);
+  return [
+    {
+      id: "chatgpt",
+      name: "Open in ChatGPT",
+      url: `https://chatgpt.com/?q=${encoded}`,
+    },
+    {
+      id: "claude",
+      name: "Open in Claude",
+      url: `https://claude.ai/new?q=${encoded}`,
+    },
+    {
+      id: "gemini",
+      name: "Open in Gemini (extension)",
+      url: `https://gemini.google.com/app?q=${encoded}`,
+    },
+  ];
+}
+
 export async function generatePrompts(evidence, options) {
   const count = Math.max(3, Math.min(Number(options.count || 5), 8));
-  const exactMatch = options.exactMatch !== false;
-  const anchors = selectAnchorPassages(evidence, count);
-  if (!anchors.length) {
+  const pool = selectQuotablePassages(evidence, Math.max(12, count * 3));
+  if (!pool.length) {
     throw new Error("There was not enough specific page copy to create prompts.");
   }
 
-  const candidates = [];
-  const seen = new Set();
   const session = options.session || null;
   const onProgress = options.onProgress || null;
-
-  for (let index = 0; index < anchors.length; index += 1) {
-    const anchor = anchors[index];
-    onProgress?.({ stage: "generating", index, total: anchors.length });
-
-    let question = "";
-    let method = "template";
-    if (session) {
-      try {
-        const raw = await options.generateQuestion(session, buildGenerationInstruction(anchor, evidence.title));
-        question = cleanQuestion(raw);
-        if (questionIsGrounded(question, anchor)) {
-          method = "chrome_ai";
-        }
-      } catch {
-        question = "";
-      }
+  let selectedIds = [];
+  if (session && options.rankPassages) {
+    try {
+      onProgress?.({ stage: "selecting", index: 0, total: 1 });
+      const raw = await options.rankPassages(
+        session,
+        buildPassageSelectionInstruction(pool, evidence.title, count),
+      );
+      selectedIds = parsePassageSelection(raw, pool.length).slice(0, count);
+    } catch {
+      selectedIds = [];
     }
-    if (!question || !questionIsGrounded(question, anchor)) {
-      question = fallbackQuestion(anchor, evidence.title);
-      method = session ? "template_fallback" : "template";
-    }
-
-    const candidate = buildPromptCandidate(anchor, question, method, exactMatch);
-    const key = candidate.prompt.replace(/\W+/g, " ").trim().toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    candidates.push(candidate);
-    if (candidates.length >= count) break;
   }
-  return candidates;
+  const orderedIds = [
+    ...selectedIds,
+    ...pool.map((_, index) => index).filter((index) => !selectedIds.includes(index)),
+  ].slice(0, count);
+  const modelSelected = new Set(selectedIds);
+  return orderedIds.map((id) =>
+    buildPromptCandidate(
+      pool[id],
+      modelSelected.has(id) ? "chrome_ai_selection" : "heuristic_selection",
+    ),
+  );
 }
 
 function parseHtmlEvidence(value) {
@@ -537,6 +545,29 @@ function distinctiveTokens(text) {
   return [...text.matchAll(/[A-Za-z0-9][A-Za-z0-9'’/-]*/g)]
     .map((match) => match[0].toLowerCase())
     .filter((token) => token.length >= 4 && !STOP_WORDS.has(token));
+}
+
+function quotableSegments(text) {
+  const parts = sentences(text);
+  const passages = [];
+  const seen = new Set();
+  for (let start = 0; start < parts.length; start += 1) {
+    let combined = "";
+    for (let end = start; end < parts.length; end += 1) {
+      combined = cleanText(`${combined} ${parts[end]}`);
+      const wordCount = (
+        combined.match(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g) || []
+      ).length;
+      if (wordCount < MIN_QUOTE_WORDS) continue;
+      const passage = extractQuoteWindow(combined);
+      if (passage && !seen.has(passage)) {
+        seen.add(passage);
+        passages.push(passage);
+      }
+      break;
+    }
+  }
+  return passages;
 }
 
 function sentences(text) {

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildGenerationInstruction,
-  cleanQuestion,
+  buildPassageSelectionInstruction,
+  chatbotLinks,
   evidenceFromContent,
-  extractExactPhrase,
+  extractQuoteWindow,
   generatePrompts,
-  questionIsGrounded,
-  selectAnchorPassages,
+  parsePassageSelection,
+  promptListText,
+  selectQuotablePassages,
 } from "../public/generator.js";
 
 const HTML = `
@@ -25,12 +26,15 @@ const HTML = `
     <main>
       <h1>Family stays beside Victoria Harbour</h1>
       <p>Guests can book connecting family suites with private balconies overlooking
-      Victoria Harbour and the Central skyline.</p>
+      Victoria Harbour and the Central skyline, with a separate children's bedroom
+      and complimentary breakfast served each morning.</p>
       <p>The rooftop pool opens from 7am until 9pm and includes a shallow children's
-      area beside the garden terrace.</p>
+      area beside the garden terrace, where attendants provide towels, chilled water,
+      and sun protection throughout the day.</p>
       <h2>Cantonese dining and afternoon tea</h2>
       <p>The harbour-view restaurant serves traditional Cantonese tasting menus and
-      afternoon tea every Friday, Saturday, and Sunday.</p>
+      afternoon tea every Friday, Saturday, and Sunday, accompanied by a live
+      string quartet from three o'clock.</p>
     </main>
   </body>
 </html>
@@ -45,14 +49,20 @@ test("evidenceFromContent ignores navigation and scripts", () => {
   assert.ok(evidence.chunks.every((chunk) => !chunk.text.includes("Sign in")));
 });
 
-test("selectAnchorPassages prefers specific facts", () => {
+test("selectQuotablePassages prefers specific facts", () => {
   const evidence = evidenceFromContent(HTML);
-  const anchors = selectAnchorPassages(evidence, 4);
-  assert.ok(anchors.length >= 3);
-  assert.ok(anchors.some((anchor) => anchor.includes("7am until 9pm")));
+  const candidates = selectQuotablePassages(evidence, 4);
+  assert.ok(candidates.length >= 3);
+  assert.ok(candidates.some((item) => item.passage.includes("7am until 9pm")));
+  assert.ok(
+    candidates.every((item) => {
+      const words = item.passage.match(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g) || [];
+      return words.length >= 20 && words.length <= 30;
+    }),
+  );
 });
 
-test("selectAnchorPassages rejects generic pasted-page boilerplate", () => {
+test("selectQuotablePassages rejects generic pasted-page boilerplate", () => {
   const evidence = evidenceFromContent(`
 Home
 
@@ -65,66 +75,97 @@ Subscribe to our newsletter and follow us on social media.
 Accept all cookies and review our privacy policy.
 
 The Calder House Meridian Suite includes a hand-carved walnut desk, room 417,
-and a private terrace overlooking the Ashbourne Observatory.
+and a private terrace overlooking the Ashbourne Observatory, with bespoke brass
+lighting designed by local artisan Eleanor Voss.
 
 The rooftop telescope session begins at 9:15pm every Thursday and is limited
-to twelve registered guests.
+to twelve registered guests, who receive a printed celestial map and guidance
+from the resident astronomer throughout the evening.
 `);
-  const anchors = selectAnchorPassages(evidence, 4);
-  assert.ok(anchors.length >= 2);
-  assert.ok(anchors.some((anchor) => anchor.includes("Calder House Meridian Suite")));
-  assert.ok(anchors.some((anchor) => anchor.includes("9:15pm")));
-  assert.ok(anchors.every((anchor) => !/cookies|newsletter|sign in/i.test(anchor)));
-});
-
-test("generatePrompts builds exact-match prompts from templates", async () => {
-  const evidence = evidenceFromContent(HTML);
-  const prompts = await generatePrompts(evidence, { count: 4, exactMatch: true });
-  assert.ok(prompts.length >= 3);
+  const candidates = selectQuotablePassages(evidence, 4);
+  assert.ok(candidates.length >= 2);
+  assert.ok(candidates.some((item) => item.passage.includes("Calder House Meridian Suite")));
+  assert.ok(candidates.some((item) => item.passage.includes("9:15pm")));
   assert.ok(
-    prompts.every((item) => item.prompt.includes(`exact phrase "${item.exactPhrase}"`)),
+    candidates.every((item) => !/cookies|newsletter|sign in/i.test(item.passage)),
   );
 });
 
-test("generatePrompts uses chrome session when provided", async () => {
+test("generatePrompts quotes exact 20–30 word page passages", async () => {
+  const evidence = evidenceFromContent(HTML);
+  const prompts = await generatePrompts(evidence, { count: 4 });
+  assert.ok(prompts.length >= 3);
+  for (const item of prompts) {
+    assert.equal(
+      item.prompt,
+      `"${item.passage}" please retrieve a web page with this exact text`,
+    );
+    assert.ok(item.supportingText.includes(item.passage));
+    const words = item.passage.match(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g) || [];
+    assert.ok(words.length >= 20 && words.length <= 30);
+  }
+});
+
+test("promptListText returns prompts without evidence or labels", () => {
+  const text = promptListText([
+    {
+      prompt: "First generated prompt?",
+      passage: "private evidence one",
+      supportingText: "Supporting copy one",
+    },
+    {
+      prompt: "Second generated prompt?",
+      passage: "private evidence two",
+      supportingText: "Supporting copy two",
+    },
+  ]);
+  assert.equal(text, "First generated prompt?\n\nSecond generated prompt?");
+  assert.doesNotMatch(text, /Supporting|private evidence/);
+});
+
+test("generatePrompts uses Chrome AI to rank passages without rewriting them", async () => {
   const evidence = evidenceFromContent(HTML);
   const prompts = await generatePrompts(evidence, {
     count: 3,
-    exactMatch: false,
     session: {},
-    generateQuestion: async (_session, instruction) => {
-      assert.match(instruction, /Return only the question/);
-      const anchor = instruction.match(/Text: (.+)\nQuestion:/)?.[1] || "";
-      const phrase = extractExactPhrase(anchor, 4);
-      return `What information is available about ${phrase}?`;
+    rankPassages: async (_session, instruction) => {
+      assert.match(instruction, /Do not rewrite any text/);
+      return '{"ids":[2,0,1]}';
     },
   });
-  assert.equal(prompts[0].generationMethod, "chrome_ai");
-  assert.ok(prompts[0].prompt.endsWith("?"));
+  assert.equal(prompts[0].generationMethod, "chrome_ai_selection");
+  assert.ok(evidence.chunks.some((chunk) => chunk.text.includes(prompts[0].passage)));
 });
 
-test("extractExactPhrase stays verbatim", () => {
+test("extractQuoteWindow stays verbatim and within 20–30 words", () => {
   const text =
-    "Guests can book connecting family suites with private balconies overlooking Victoria Harbour.";
-  const phrase = extractExactPhrase(text);
-  assert.ok(text.includes(phrase));
-  assert.ok(phrase.split(/\s+/).length <= 10);
+    "Guests can book connecting family suites with private balconies overlooking Victoria Harbour and the Central skyline, including breakfast, children's amenities, evening service, and flexible arrival options.";
+  const passage = extractQuoteWindow(text);
+  assert.ok(text.includes(passage));
+  const words = passage.match(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g) || [];
+  assert.ok(words.length >= 20 && words.length <= 30);
 });
 
-test("cleanQuestion normalizes model output", () => {
-  assert.equal(cleanQuestion('Question: "What time does the pool open?"'), "What time does the pool open?");
+test("parsePassageSelection accepts valid unique candidate IDs", () => {
+  assert.deepEqual(parsePassageSelection('{"ids":[2,0,2,99]}', 3), [2, 0]);
 });
 
-test("questionIsGrounded rejects unrelated output", () => {
-  assert.equal(questionIsGrounded("Tell me a joke.", "The rooftop pool opens from 7am until 9pm."), false);
-  assert.equal(
-    questionIsGrounded("When does the rooftop pool open?", "The rooftop pool opens from 7am until 9pm."),
-    true,
+test("buildPassageSelectionInstruction asks for meaningful unchanged text", () => {
+  const instruction = buildPassageSelectionInstruction(
+    [{ passage: "A sufficiently long exact candidate passage from the supplied page content for retrieval testing and meaningful selection by the local model." }],
+    "Hotel",
+    1,
   );
+  assert.match(instruction, /most meaningful, page-specific quotations/);
+  assert.match(instruction, /Do not rewrite any text/);
 });
 
-test("buildGenerationInstruction includes anchor text", () => {
-  const instruction = buildGenerationInstruction("The rooftop pool opens from 7am until 9pm.", "Hotel");
-  assert.match(instruction, /Page title: Hotel/);
-  assert.match(instruction, /rooftop pool/);
+test("chatbotLinks URL-encode the complete prompt", () => {
+  const prompt = '"A quoted passage & detail" please retrieve a web page with this exact text';
+  const links = chatbotLinks(prompt);
+  assert.deepEqual(links.map((item) => item.id), ["chatgpt", "claude", "gemini"]);
+  assert.equal(new URL(links[0].url).searchParams.get("q"), prompt);
+  assert.equal(new URL(links[1].url).searchParams.get("q"), prompt);
+  assert.equal(new URL(links[2].url).pathname, "/app");
+  assert.equal(new URL(links[2].url).searchParams.get("q"), prompt);
 });

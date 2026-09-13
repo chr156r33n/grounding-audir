@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  --ink: #1f1a14;
+  --muted: #6a6258;
+  --accent: #0f5c4c;
+  --soft: #d8efe8;
+  --border: #ddd4c6;
+  --error: #9b1c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 430px;
+  min-height: 300px;
+  margin: 0;
+  padding: 18px;
+  background: #f8f4ec;
+  color: var(--ink);
+}
+
+header {
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.status,
+.muted,
+footer {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+input {
+  width: 90px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+button,
+.chat-link {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 11px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button {
+  background: #eae4da;
+  color: var(--ink);
+}
+
+.primary {
+  width: 100%;
+  padding: 11px;
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.error {
+  min-height: 18px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+.results-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.prompt-card {
+  margin: 10px 0;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+}
+
+.prompt {
+  margin: 0 0 9px;
+  white-space: pre-wrap;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chat-link {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+footer {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}

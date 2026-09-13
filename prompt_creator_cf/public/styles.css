@@ -184,6 +184,11 @@ fieldset legend {
   color: var(--ink);
 }
 
+.download-row .primary-action {
+  background: var(--accent);
+  color: #fff;
+}
+
 .prompt-list {
   display: grid;
   gap: 1rem;
@@ -220,6 +225,28 @@ fieldset legend {
   padding: 0.9rem;
   border-radius: 10px;
   background: #f7f3ec;
+}
+
+.chatbot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.chatbot-links a {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.chatbot-links a:hover,
+.chatbot-links a:focus-visible {
+  background: var(--accent-soft);
 }
 
 .copy-button {

@@ -4,7 +4,12 @@ import {
   getChromeAiStatus,
   promptChromeAi,
 } from "./chrome-ai.js";
-import { evidenceFromContent, generatePrompts } from "./generator.js";
+import {
+  chatbotLinks,
+  evidenceFromContent,
+  generatePrompts,
+  promptListText,
+} from "./generator.js";
 
 const $ = (selector) => document.querySelector(selector);
 let lastResults = null;
@@ -44,13 +49,23 @@ function renderResults(result) {
             <span class="method-pill">${escapeHtml(item.generationMethod.replace(/_/g, " "))}</span>
           </div>
           <pre class="prompt-text">${escapeHtml(item.prompt)}</pre>
+          <div class="chatbot-links">
+            ${chatbotLinks(item.prompt)
+              .map(
+                (link) => `
+                  <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">
+                    ${escapeHtml(link.name)}
+                  </a>`,
+              )
+              .join("")}
+          </div>
           <details>
-            <summary>Why this prompt is grounded</summary>
+            <summary>Why this passage was selected</summary>
             <dl>
-              <dt>Exact phrase</dt>
-              <dd>${escapeHtml(item.exactPhrase)}</dd>
-              <dt>Supporting copy</dt>
-              <dd>${escapeHtml(item.sourceExcerpt)}</dd>
+              <dt>Quoted passage</dt>
+              <dd>${escapeHtml(item.passage)}</dd>
+              <dt>Supporting page text</dt>
+              <dd>${escapeHtml(item.supportingText)}</dd>
             </dl>
           </details>
           <button type="button" class="copy-button" data-prompt="${encodeURIComponent(item.prompt)}">
@@ -72,12 +87,22 @@ function renderResults(result) {
   });
 
   $("#results-meta").textContent =
-    `${result.exactMatch ? "Exact-match" : "Natural-language"} mode · ` +
     `${result.evidence.title || result.evidence.source} · ` +
     `${result.prompts.length} prompts · ` +
-    `${result.chromeAiUsed ? "Chrome AI used where available" : "Templates only"}`;
+    `${result.chromeAiUsed ? "Chrome AI selection" : "Heuristic selection"}`;
 
-  const textExport = result.prompts.map((item, index) => `${index + 1}. ${item.prompt}`).join("\n\n");
+  const plainPromptList = promptListText(result.prompts);
+  const copyAllButton = $("#copy-all");
+  copyAllButton.onclick = async () => {
+    await navigator.clipboard.writeText(plainPromptList);
+    copyAllButton.textContent = "All prompts copied";
+    setTimeout(() => {
+      copyAllButton.textContent = "Copy all prompts";
+    }, 1500);
+  };
+  const textExport = result.prompts
+    .map((item, index) => `${index + 1}. ${item.prompt}`)
+    .join("\n\n");
   $("#download-txt").onclick = () => downloadBlob(textExport, "exact-match-prompts.txt", "text/plain");
   $("#download-json").onclick = () =>
     downloadBlob(
@@ -85,7 +110,6 @@ function renderResults(result) {
         {
           source: result.evidence.source,
           title: result.evidence.title,
-          exactMatch: result.exactMatch,
           prompts: result.prompts,
         },
         null,
@@ -127,33 +151,43 @@ $("#prompt-form").addEventListener("submit", async (event) => {
     const formData = new FormData(event.currentTarget);
     const evidence = loadEvidence(formData);
     const count = Number(formData.get("count") || 5);
-    const exactMatch = formData.get("exact-match") === "on";
 
     let session = null;
     let chromeAiUsed = false;
     const status = await getChromeAiStatus();
     if (status !== "unsupported" && status !== "unavailable") {
-      setStatus("Preparing Chrome on-device model…", "pending");
-      session = await createChromeAiSession({
-        onDownloadProgress: (loaded) => {
-          setStatus(`Downloading Chrome AI model… ${Math.round(loaded * 100)}%`, "pending");
-        },
-      });
-      setStatus("Chrome AI ready", "ready");
-      chromeAiUsed = true;
+      try {
+        setStatus("Preparing Chrome on-device model…", "pending");
+        session = await createChromeAiSession({
+          onDownloadProgress: (loaded) => {
+            setStatus(
+              `Downloading Chrome AI model… ${Math.round(loaded * 100)}%`,
+              "pending",
+            );
+          },
+        });
+        setStatus("Chrome AI ready", "ready");
+        chromeAiUsed = true;
+      } catch {
+        session = null;
+        setStatus("Chrome AI timed out — using heuristic selection", "muted");
+      }
     }
 
     const prompts = await generatePrompts(evidence, {
       count,
-      exactMatch,
       session,
-      generateQuestion: promptChromeAi,
-      onProgress: ({ index, total }) => {
-        button.textContent = `Creating prompts… ${index + 1}/${total}`;
+      rankPassages: promptChromeAi,
+      onProgress: ({ total }) => {
+        button.textContent =
+          total === 1 ? "Selecting the best passages…" : "Creating prompts…";
       },
     });
+    chromeAiUsed = prompts.some(
+      (item) => item.generationMethod === "chrome_ai_selection",
+    );
 
-    lastResults = { evidence, prompts, exactMatch, chromeAiUsed };
+    lastResults = { evidence, prompts, chromeAiUsed };
     renderResults(lastResults);
   } catch (caught) {
     error.textContent = caught.message;

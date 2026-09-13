@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Exact Match Passage Finder",
+  "version": "1.1.0",
+  "description": "Create exact-text retrieval prompts from the rendered page.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://gemini.google.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["gemini-prefill.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Create exact-match prompts",
+    "default_popup": "popup.html"
+  }
+}

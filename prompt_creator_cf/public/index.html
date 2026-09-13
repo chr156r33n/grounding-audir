@@ -22,37 +22,14 @@
     <main class="shell">
       <section class="intro panel">
         <p>
-          Turn a page into prompts you can paste into a chatbot to test whether its
-          retrieval layer can surface your content. Generation runs in your browser.
-          When Chrome on-device AI is available, it helps phrase the questions.
-          Otherwise the app falls back to grounded templates.
+          Paste page copy and turn it into prompts you can use to test whether a
+          chatbot's retrieval layer can surface your content. Everything stays in
+          your browser. Chrome on-device AI helps phrase the questions when available;
+          otherwise the app uses grounded templates.
         </p>
       </section>
 
       <form id="prompt-form" class="panel">
-        <fieldset class="mode-fieldset">
-          <legend>Content source</legend>
-          <label class="radio">
-            <input type="radio" name="input-mode" value="paste" checked />
-            <span>Paste HTML or visible copy</span>
-          </label>
-          <label class="radio">
-            <input type="radio" name="input-mode" value="url" />
-            <span>Fetch a public page URL</span>
-          </label>
-        </fieldset>
-
-        <label>
-          <span>Page URL</span>
-          <input
-            id="source-url"
-            name="source-url"
-            type="url"
-            placeholder="https://example.com/page-to-test"
-          />
-          <small>Optional when pasting copy. Required when fetching a URL.</small>
-        </label>
-
         <label>
           <span>Page HTML or visible copy</span>
           <textarea
@@ -60,7 +37,9 @@
             name="page-content"
             rows="10"
             placeholder="Paste several paragraphs from the page…"
+            required
           ></textarea>
+          <small>This content is processed locally and is never uploaded.</small>
         </label>
 
         <div class="field-grid">
@@ -101,6 +80,7 @@
         <ul>
           <li>Chrome on-device AI works in supported desktop Chrome builds. Other browsers use templates only.</li>
           <li>The model downloads once in Chrome; this app does not call a hosted LLM API.</li>
+          <li>Your pasted page content never leaves the browser.</li>
           <li>A missing chatbot result does not prove your page is absent from its index.</li>
         </ul>
       </section>

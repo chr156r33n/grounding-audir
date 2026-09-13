@@ -9,16 +9,6 @@ import { evidenceFromContent, generatePrompts } from "./generator.js";
 const $ = (selector) => document.querySelector(selector);
 let lastResults = null;
 
-async function api(path, options) {
-  const response = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...options,
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
-  return payload;
-}
-
 function setStatus(text, tone = "neutral") {
   const badge = $("#model-status");
   badge.textContent = text;
@@ -37,27 +27,10 @@ async function refreshChromeAiStatus() {
   return status;
 }
 
-function toggleInputMode() {
-  const mode = document.querySelector('input[name="input-mode"]:checked')?.value || "paste";
-  $("#page-content").disabled = mode !== "paste";
-  $("#source-url").required = mode === "url";
-}
-
-async function loadEvidence(formData) {
-  const mode = formData.get("input-mode");
-  if (mode === "url") {
-    const url = String(formData.get("source-url") || "").trim();
-    if (!url) throw new Error("Enter a public page URL.");
-    const payload = await api("/api/fetch", {
-      method: "POST",
-      body: JSON.stringify({ url }),
-    });
-    return evidenceFromContent(payload.html, url);
-  }
+function loadEvidence(formData) {
   const content = String(formData.get("page-content") || "").trim();
   if (!content) throw new Error("Paste page HTML or visible page copy.");
-  const source = String(formData.get("source-url") || "").trim();
-  return evidenceFromContent(content, source);
+  return evidenceFromContent(content);
 }
 
 function renderResults(result) {
@@ -152,7 +125,7 @@ $("#prompt-form").addEventListener("submit", async (event) => {
 
   try {
     const formData = new FormData(event.currentTarget);
-    const evidence = await loadEvidence(formData);
+    const evidence = loadEvidence(formData);
     const count = Number(formData.get("count") || 5);
     const exactMatch = formData.get("exact-match") === "on";
 
@@ -192,9 +165,4 @@ $("#prompt-form").addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelectorAll('input[name="input-mode"]').forEach((input) => {
-  input.addEventListener("change", toggleInputMode);
-});
-
-toggleInputMode();
 refreshChromeAiStatus();

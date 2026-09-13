@@ -26,6 +26,10 @@ places its prompt in Gemini's conversation box, removes the parameter from the
 address bar, and leaves submission to the user.
 
 Page content and model inference remain on the user's device.
+The latest generated prompts are cached in Chrome's in-memory session storage.
+When a chatbot link closes the popup, reopening **exactly matchy** restores those
+results without analyzing the page again. The cache is discarded when the
+browser session ends.
 
 ## Install unpacked
 
@@ -43,6 +47,7 @@ allow extension DOM access.
 
 - `activeTab`: temporary access to the page the user explicitly analyzes
 - `scripting`: execute the rendered-DOM extraction function
+- `storage`: retain the latest prompt results for the current browser session
 - `https://gemini.google.com/*`: transfer a `?q=` prompt into Gemini's composer
 
 There are no other persistent host permissions, background services, analytics,

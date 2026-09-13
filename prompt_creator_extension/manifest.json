@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "exactly matchy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Create exact-text retrieval prompts from the rendered page.",
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://gemini.google.com/*"],
   "content_scripts": [
     {

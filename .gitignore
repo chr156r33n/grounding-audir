@@ -6,3 +6,5 @@ __pycache__/
 cloudflare/node_modules/
 cloudflare/.wrangler/
 cloudflare/.dev.vars
+prompt_creator_cf/node_modules/
+prompt_creator_cf/.wrangler/

@@ -12,7 +12,7 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery import QueryDiscoveryResult
 from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
@@ -261,9 +261,9 @@ def _start_query_discovery(
         return None
     status = st.empty()
     if values.get("discovery_paste"):
-        status.info("⟳ Query discovery — analysing pasted page copy")
+        status.info("⟳ Page snippets — analysing pasted page copy")
     else:
-        status.info("⟳ Query discovery — fetching and analysing page")
+        status.info("⟳ Page snippets — fetching and analysing page")
     accept_language = values.get("market") or values.get("language") or "en-GB"
     try:
         discovery = call_discover_queries(
@@ -286,7 +286,7 @@ def _start_query_discovery(
         )
     else:
         status.error(
-            f"Query discovery — {discovery.error or 'No suggestions were generated.'}"
+            f"Page snippets — {discovery.error or 'No suggestions were selected.'}"
         )
     return discovery
 
@@ -490,7 +490,7 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
     )
 
     if discovery.debug_mode:
-        with st.expander("Query discovery debug", expanded=True):
+        with st.expander("Page snippet debug", expanded=True):
             if discovery.debug:
                 st.markdown("**Discovery diagnostics**")
                 st.json(discovery.debug)
@@ -518,13 +518,13 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                     st.markdown("Raw response (sanitised)")
                     st.json(redact_secrets(generator.raw_response))
             st.download_button(
-                "Download query discovery debug JSON",
+                "Download page snippet debug JSON",
                 json.dumps(
                     discovery.to_dict(include_raw=True),
                     indent=2,
                     ensure_ascii=False,
                 ),
-                file_name="query-discovery-debug.json",
+                file_name="page-snippets-debug.json",
                 mime="application/json",
             )
 

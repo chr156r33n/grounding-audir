@@ -12,7 +12,7 @@ from core.diagnostics import build_state_notes, unknown_observation_fields
 from core.export import export_csv, export_json
 from core.matching import normalize_url
 from core.models import GroundingRequest, GroundingRun, ProviderField, Target
-from core.query_discovery import QueryDiscoveryResult, discover_queries
+from core.query_discovery import QueryDiscoveryResult
 from core.query_discovery_compat import QueryDiscoveryCompatibilityError, call_discover_queries
 from core.query_discovery_config import DEFAULT_FETCH_PROFILE, FETCH_PROFILES
 from core.credentials_help import render_credentials_help
@@ -52,7 +52,7 @@ def main() -> None:
 
     action, values, selected, configs = _configuration_form()
     if action == "discover":
-        _start_query_discovery(values, configs)
+        _start_query_discovery(values)
     elif action == "run":
         _start_run(values, selected, configs)
 
@@ -141,11 +141,11 @@ def _configuration_form():
             key="input_query",
         )
         discovery_url = st.text_input(
-            "Optional source URL for query discovery",
+            "Optional source URL for snippet suggestions",
             placeholder="https://example.com/page-to-test",
             help=(
-                "Used as page context for query generation. When pasted copy is provided below, "
-                "the URL is optional but still helps anchor suggestions to the right page."
+                "The app selects exact passages from this page. When pasted copy is provided "
+                "below, the URL is optional."
             ),
         )
         discovery_paste = st.text_area(
@@ -171,11 +171,11 @@ def _configuration_form():
             ),
         )
         discovery_count = st.slider(
-            "Query suggestions",
+            "Page snippet suggestions",
             min_value=3,
             max_value=10,
             value=6,
-            help="Maximum number of merged suggestions to keep across Gemini and OpenAI.",
+            help="Number of exact 20–30 word page passages to suggest.",
         )
         target = st.text_input("Target domain, hostname, or URL prefix", placeholder="fourseasons.com")
         col1, col2, col3 = st.columns(3)
@@ -227,7 +227,7 @@ def _configuration_form():
         discovery_col, run_col = st.columns(2)
         with discovery_col:
             discover_submitted = st.form_submit_button(
-                "Discover queries from URL",
+                "Suggest page snippets",
                 use_container_width=True,
             )
         with run_col:
@@ -255,22 +255,19 @@ def _configuration_form():
 
 def _start_query_discovery(
     values,
-    configs: dict[str, dict[str, str]],
 ) -> QueryDiscoveryResult | None:
     if not values["discovery_url"] and not values.get("discovery_paste"):
         st.error("Enter a source URL to fetch, or paste page HTML/text below.")
         return None
     status = st.empty()
     if values.get("discovery_paste"):
-        status.info("⟳ Query discovery — analysing pasted page copy")
+        status.info("⟳ Page snippets — analysing pasted page copy")
     else:
-        status.info("⟳ Query discovery — fetching and analysing page")
+        status.info("⟳ Page snippets — fetching and analysing page")
     accept_language = values.get("market") or values.get("language") or "en-GB"
     try:
         discovery = call_discover_queries(
             values["discovery_url"],
-            openai_config=configs.get("openai_web"),
-            gemini_config=configs.get("gemini"),
             count=values["discovery_count"],
             debug=values["debug_mode"],
             page_content=values.get("discovery_paste") or None,
@@ -285,11 +282,11 @@ def _start_query_discovery(
     st.session_state.pop("grounding_request", None)
     if discovery.candidates:
         status.success(
-            f"✓ Query discovery — {len(discovery.candidates)} suggestions generated"
+            f"✓ Page snippets — {len(discovery.candidates)} suggestions selected"
         )
     else:
         status.error(
-            f"Query discovery — {discovery.error or 'No suggestions were generated.'}"
+            f"Page snippets — {discovery.error or 'No suggestions were selected.'}"
         )
     return discovery
 
@@ -304,14 +301,14 @@ def _start_run(values, selected: list[str], configs: dict[str, dict[str, str]]) 
 
     query = values["query"].strip()
     if values["discovery_url"] or values.get("discovery_paste"):
-        discovery = _start_query_discovery(values, configs)
+        discovery = _start_query_discovery(values)
         if discovery and discovery.candidates and not query:
             query = discovery.candidates[0].query
             st.session_state["input_query"] = query
         if not query:
             st.error(
                 "Enter a grounding/search phrase, or provide page content that yields "
-                "query suggestions."
+                "snippet suggestions."
             )
             return
     elif not query:
@@ -408,7 +405,7 @@ def _use_discovered_query(query: str) -> None:
 
 
 def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
-    st.subheader("URL query discovery")
+    st.subheader("Page snippet suggestions")
     if discovery.error:
         st.warning(discovery.error)
     if discovery.evidence:
@@ -422,16 +419,13 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             f"{source_note} · {evidence.final_url or evidence.requested_url} · "
             f"{evidence.downloaded_bytes:,} bytes · {len(evidence.chunks)} DOM chunks selected"
         )
-        if evidence.key_terms:
-            st.caption(f"Extracted page terms: {', '.join(evidence.key_terms)}")
     if discovery.candidates:
         st.dataframe(
             [
                 {
-                    "Query": item.query,
-                    "Why this page fits": item.rationale,
-                    "DOM evidence": item.evidence,
-                    "Generated by": ", ".join(item.generators),
+                    "Page snippet": item.query,
+                    "Selection": item.rationale,
+                    "Source text": item.evidence,
                 }
                 for item in discovery.candidates
             ],
@@ -439,14 +433,14 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
             use_container_width=True,
         )
         st.caption(
-            "Suggestions are hypotheses, not ranking guarantees. Choose one to place it "
-            "in the query field, then run the test again."
+            "These are unchanged passages from the page, not AI-generated queries. "
+            "Choose one to place it in the search field, then run the test."
         )
         button_columns = st.columns(2)
         for index, item in enumerate(discovery.candidates):
             with button_columns[index % 2]:
                 st.button(
-                    f"Use query {index + 1}: {item.query}",
+                    f"Use snippet {index + 1}: {item.query}",
                     key=f"use_discovered_{index}_{hash(item.query)}",
                     on_click=_use_discovered_query,
                     args=(item.query,),
@@ -484,39 +478,19 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                 use_container_width=True,
             )
 
-    st.markdown("#### Query generators")
-    if discovery.generators:
-        st.dataframe(
-            [
-                {
-                    "Provider": item.provider_name,
-                    "Model": item.model,
-                    "Status": item.status,
-                    "Suggestions": len(item.queries),
-                    "Latency (ms)": item.latency_ms,
-                    "Error": item.error,
-                }
-                for item in discovery.generators
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-    else:
-        st.info("No query-generation API was called.")
-
     st.download_button(
-        "Download query suggestions JSON",
+        "Download snippet suggestions JSON",
         json.dumps(
             discovery.to_dict(include_raw=False),
             indent=2,
             ensure_ascii=False,
         ),
-        file_name="query-discovery.json",
+        file_name="page-snippets.json",
         mime="application/json",
     )
 
     if discovery.debug_mode:
-        with st.expander("Query discovery debug", expanded=True):
+        with st.expander("Page snippet debug", expanded=True):
             if discovery.debug:
                 st.markdown("**Discovery diagnostics**")
                 st.json(discovery.debug)
@@ -544,13 +518,13 @@ def _render_query_discovery(discovery: QueryDiscoveryResult) -> None:
                     st.markdown("Raw response (sanitised)")
                     st.json(redact_secrets(generator.raw_response))
             st.download_button(
-                "Download query discovery debug JSON",
+                "Download page snippet debug JSON",
                 json.dumps(
                     discovery.to_dict(include_raw=True),
                     indent=2,
                     ensure_ascii=False,
                 ),
-                file_name="query-discovery-debug.json",
+                file_name="page-snippets-debug.json",
                 mime="application/json",
             )
 

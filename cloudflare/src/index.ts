@@ -22,7 +22,7 @@ export default {
         authRequired: !!env.OBSERVATORY_ACCESS_KEY,
         capabilities: {
           queryDiscovery: true,
-          queryDiscoveryLlm: !!(env.OPENAI_API_KEY || env.GEMINI_API_KEY),
+          pageSnippetSuggestions: true,
         },
         note:
           "Microsoft Bing Grounding remains available in Streamlit; the Worker supports Foundry Web Search and Web IQ.",
@@ -67,7 +67,7 @@ export default {
     if (url.pathname === "/api/discover" && request.method === "POST") {
       try {
         const body = (await request.json()) as DiscoveryRequest;
-        return json(await discoverQueries(body, env));
+        return json(await discoverQueries(body));
       } catch (error) {
         return json({ error: message(error) }, 400);
       }

@@ -74,7 +74,7 @@ $("#discover-button").addEventListener("click", async () => {
   const error = $("#discovery-error");
   error.textContent = "";
   button.disabled = true;
-  button.textContent = "Discovering…";
+  button.textContent = "Selecting snippets…";
   try {
     const result = await api("/api/discover", {
       method: "POST",
@@ -84,9 +84,6 @@ $("#discover-button").addEventListener("click", async () => {
         count: 6,
       }),
     });
-    $("#term-list").innerHTML = result.keyTerms
-      .map((term) => `<span class="term">${escapeHtml(term)}</span>`)
-      .join("");
     $("#candidate-list").innerHTML = result.candidates
       .map(
         (candidate) => `
@@ -98,13 +95,8 @@ $("#discover-button").addEventListener("click", async () => {
                   ? `<small class="muted">${escapeHtml(candidate.rationale)}</small>`
                   : ""
               }
-              ${
-                candidate.generator
-                  ? `<small class="muted">${escapeHtml(candidate.generator)}</small>`
-                  : ""
-              }
             </div>
-            <button type="button" data-query="${encodeURIComponent(candidate.query)}">Use</button>
+            <button type="button" data-query="${encodeURIComponent(candidate.query)}">Use snippet</button>
           </div>`,
       )
       .join("");
@@ -124,7 +116,7 @@ $("#discover-button").addEventListener("click", async () => {
     error.textContent = caught.message;
   } finally {
     button.disabled = false;
-    button.textContent = "Discover queries";
+    button.textContent = "Suggest page snippets";
   }
 });
 

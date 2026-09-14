@@ -33,25 +33,24 @@ select **Run test**. API calls are concurrent. The default per-provider timeout 
 90 seconds (configurable in the form; OpenAI and other web-search providers use
 at least 120 seconds when needed). Provider API costs may apply.
 
-## URL query discovery
+## Page snippet suggestions
 
-Optionally paste a public page URL in **Source URL for query discovery**, then
-select **Discover queries from URL** to run discovery without starting the
-grounding providers. Alternatively, **Run test** performs discovery and the
-configured grounding run together. The app:
+Optionally enter a public page URL under **Optional source URL for snippet
+suggestions**, then select **Suggest page snippets** without starting the
+grounding providers. You can paste HTML or visible page copy when fetching is
+blocked. Alternatively, **Run test** selects a snippet and starts the configured
+grounding run together. The app:
 
 1. downloads the page's static HTML once (no browser or JavaScript execution);
 2. extracts the title, description, canonical URL, headings, and high-signal
    body chunks;
-3. asks each configured OpenAI and Gemini API for realistic queries where that
-   page would be highly relevant if it is indexed and available to the
-   retrieval pipeline; and
-4. merges and displays the candidates with rationale and supporting DOM
-   evidence.
+3. selects distinctive, unchanged 20–30 word passages using local heuristics;
+   and
+4. displays the passages with their supporting page text.
 
-Use a suggestion to populate the main query field, then explicitly run the test
-again. Suggestions are retrieval hypotheses, not rank or inclusion guarantees.
-Query discovery only fetches public HTTP(S) addresses: private, loopback, and
+Use a snippet to populate the main search field, then explicitly run the test
+again. Snippet selection does not call a query-generation API. Page fetching
+only accepts public HTTP(S) addresses: private, loopback, and
 link-local targets are rejected, redirects are revalidated, downloads are
 size-limited, and only HTML content is accepted.
 

@@ -4,10 +4,9 @@ import ipaddress
 import json
 import re
 import socket
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from time import perf_counter
 from dataclasses import asdict, dataclass, field
 from html.parser import HTMLParser
-from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -28,38 +27,36 @@ MAX_PROMPT_CHARS = 8_000
 MAX_KEY_TERMS = 20
 FETCH_TIMEOUT_SECONDS = 15.0
 GENERATOR_TIMEOUT_SECONDS = 60.0
+MIN_SNIPPET_WORDS = 20
+MAX_SNIPPET_WORDS = 30
 
 _STOP_WORDS = frozenset(
     {
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "by",
-        "for",
-        "from",
-        "has",
-        "have",
-        "in",
-        "is",
-        "it",
-        "its",
-        "of",
-        "on",
-        "or",
-        "that",
-        "the",
-        "their",
-        "this",
-        "to",
-        "with",
-        "you",
-        "your",
+        "about", "after", "also", "and", "are", "because", "been", "before",
+        "being", "between", "both", "but", "can", "does", "for", "from", "has",
+        "have", "into", "more", "most", "not", "only", "other", "over", "page",
+        "say", "says", "than", "that", "the", "their", "there", "these", "they",
+        "this", "through", "under", "using", "was", "were", "what", "when",
+        "where", "which", "while", "who", "will", "with", "would", "you", "your",
     }
 )
+_GENERIC_WORDS = frozenset(
+    {
+        "account", "basket", "blog", "contact", "cookie", "copyright", "explore",
+        "follow", "help", "home", "learn", "login", "menu", "newsletter",
+        "privacy", "read", "register", "search", "share", "shop", "signin",
+        "signup", "social", "subscribe", "terms",
+    }
+)
+_BOILERPLATE = re.compile(
+    r"\b(?:accept (?:all )?cookies?|cookie (?:policy|settings?)|privacy policy|"
+    r"terms (?:and|&) conditions|sign (?:in|up)|log in|register|subscribe|"
+    r"newsletter|skip to content|read more|learn more|view all|contact us|"
+    r"follow us|share (?:this|on)|add to (?:cart|basket)|open menu|close menu|"
+    r"back to top|all rights reserved)\b",
+    re.I,
+)
+_WORD_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’&/-]*")
 
 
 @dataclass(frozen=True)
@@ -172,9 +169,8 @@ def discover_queries(
             )
         else:
             raise QueryDiscoveryError(
-                "Enter a source URL to fetch, or paste page HTML/text to skip the download."
+                "Enter a source URL to fetch, or paste page HTML/text to extract snippets."
             )
-        evidence.key_terms = extract_key_terms(evidence)
         result.evidence = evidence
         result.source_url = evidence.final_url or evidence.requested_url
     except QueryDiscoveryError as exc:
@@ -190,91 +186,15 @@ def discover_queries(
         result.finished_at = utc_now()
         return result
 
-    jobs: list[tuple[str, dict[str, Any]]] = []
-    if openai_config and str(openai_config.get("api_key", "")).strip():
-        jobs.append(("openai", openai_config))
-    if gemini_config and str(gemini_config.get("api_key", "")).strip():
-        jobs.append(("gemini", gemini_config))
-    if not jobs:
-        result.error = (
-            "URL evidence was extracted, but query generation needs an OpenAI or Gemini API key."
-        )
-        result.finished_at = utc_now()
-        return result
-
-    prompt = build_query_prompt(evidence, result.requested_count)
-    executor = ThreadPoolExecutor(
-        max_workers=len(jobs),
-        thread_name_prefix="query-discovery",
-    )
-    future_map: dict[Future[GeneratorResult], str] = {}
-    for provider_id, config in jobs:
-        generator = _generate_openai if provider_id == "openai" else _generate_gemini
-        future_map[executor.submit(generator, prompt, config, debug)] = provider_id
-
-    deadline = perf_counter() + GENERATOR_TIMEOUT_SECONDS
-    try:
-        while future_map:
-            remaining = deadline - perf_counter()
-            if remaining <= 0:
-                break
-            done, _ = wait(
-                future_map,
-                timeout=remaining,
-                return_when=FIRST_COMPLETED,
-            )
-            for future in done:
-                provider_id = future_map.pop(future)
-                try:
-                    result.generators.append(future.result())
-                except Exception as exc:
-                    result.generators.append(
-                        GeneratorResult(
-                            provider_id=provider_id,
-                            provider_name="OpenAI" if provider_id == "openai" else "Gemini",
-                            model=str(
-                                (openai_config if provider_id == "openai" else gemini_config).get(
-                                    "model", ""
-                                )
-                            ),
-                            status="failed",
-                            latency_ms=0,
-                            error="Query generation failed before a response was returned.",
-                            debug=_exception_debug(exc) if debug else {},
-                        )
-                    )
-        for future, provider_id in list(future_map.items()):
-            future.cancel()
-            config = openai_config if provider_id == "openai" else gemini_config
-            result.generators.append(
-                GeneratorResult(
-                    provider_id=provider_id,
-                    provider_name="OpenAI" if provider_id == "openai" else "Gemini",
-                    model=str((config or {}).get("model", "")),
-                    status="timed_out",
-                    latency_ms=round(GENERATOR_TIMEOUT_SECONDS * 1000),
-                    error=(
-                        f"Query generation exceeded the "
-                        f"{GENERATOR_TIMEOUT_SECONDS:g}-second discovery timeout."
-                    ),
-                )
-            )
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-    result.generators.sort(key=lambda item: item.provider_id)
-    term_seeded = build_term_seeded_queries(
-        evidence,
-        evidence.key_terms,
-        limit=result.requested_count,
-    )
-    result.candidates = merge_candidates(
-        result.generators,
-        result.requested_count,
-        seed=term_seeded,
-    )
+    # Config parameters remain accepted for compatibility with already-running
+    # Streamlit sessions, but snippet selection is deliberately local and deterministic.
+    del openai_config, gemini_config
+    result.candidates = select_page_snippets(evidence, limit=result.requested_count)
     if not result.candidates:
-        result.error = "No valid query candidates were returned by the configured generators."
+        result.error = (
+            "This page did not contain enough specific 20–30 word passages. "
+            "Paste more visible page copy and try again."
+        )
     result.finished_at = utc_now()
     return result
 
@@ -556,6 +476,160 @@ def select_useful_chunks(parser: "_EvidenceParser", limit: int = 10) -> list[Pag
         if len(selected) >= limit:
             break
     return selected
+
+
+def select_page_snippets(
+    evidence: PageEvidence,
+    *,
+    limit: int = 6,
+) -> list[QueryCandidate]:
+    """Select exact, page-specific passages without calling a language model."""
+    kind_bonus = {
+        "meta_description": 35,
+        "h1": 30,
+        "h2": 22,
+        "h3": 14,
+        "p": 8,
+        "li": 4,
+    }
+    raw: list[tuple[str, PageChunk, list[str]]] = []
+    for chunk in evidence.chunks:
+        for passage in _quotable_segments(chunk.text):
+            if _is_boilerplate(passage, chunk.kind):
+                continue
+            tokens = _distinctive_tokens(passage)
+            if len(set(tokens)) < 3:
+                continue
+            raw.append((passage, chunk, tokens))
+
+    frequency: dict[str, int] = {}
+    for _, _, tokens in raw:
+        for token in set(tokens):
+            frequency[token] = frequency.get(token, 0) + 1
+    title_tokens = set(_distinctive_tokens(evidence.title or ""))
+
+    def rank(item: tuple[str, PageChunk, list[str]]) -> tuple[float, str]:
+        passage, chunk, tokens = item
+        unique = set(tokens)
+        rarity = sum(1 / frequency[token] for token in unique)
+        title_overlap = len(unique & title_tokens)
+        generic_count = len(unique & _GENERIC_WORDS)
+        score = (
+            chunk.score
+            + kind_bonus.get(chunk.kind, 0)
+            + min(rarity * 5, 35)
+            + min(title_overlap * 4, 12)
+            - generic_count * 5
+        )
+        if re.search(r"\d", passage):
+            score += 8
+        if _specific_name_count(passage) >= 2:
+            score += 8
+        return (-score, passage)
+
+    selected: list[QueryCandidate] = []
+    fingerprints: list[set[str]] = []
+    for passage, chunk, tokens in sorted(raw, key=rank):
+        fingerprint = set(tokens)
+        if any(
+            len(fingerprint & prior) / max(1, min(len(fingerprint), len(prior))) > 0.7
+            for prior in fingerprints
+        ):
+            continue
+        selected.append(
+            QueryCandidate(
+                query=passage,
+                rationale=f"Exact {len(_words(passage))}-word page snippet.",
+                evidence=chunk.text[:600],
+                generators=("page_snippet",),
+            )
+        )
+        fingerprints.append(fingerprint)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def extract_snippet_window(text: str) -> str | None:
+    matches = list(_WORD_PATTERN.finditer(text))
+    if len(matches) < MIN_SNIPPET_WORDS:
+        return None
+    if len(matches) <= MAX_SNIPPET_WORDS:
+        return text[matches[0].start() : matches[-1].end()]
+
+    best: tuple[int, int, int] | None = None
+    for size in range(MAX_SNIPPET_WORDS, MIN_SNIPPET_WORDS - 1, -1):
+        for start in range(len(matches) - size + 1):
+            score = 0
+            for match in matches[start : start + size]:
+                word = match.group()
+                lower = word.lower()
+                if lower not in _STOP_WORDS and len(word) > 3:
+                    score += 2
+                if lower in _GENERIC_WORDS:
+                    score -= 3
+                if word[0].isupper() or any(character.isdigit() for character in word):
+                    score += 1
+            first = matches[start]
+            last = matches[start + size - 1]
+            before = text[: first.start()].rstrip()
+            after = text[last.end() :].lstrip()
+            if not before or re.search(r"""[.!?]["')\]]?$""", before):
+                score += 12
+            if not after or re.match(r"""[.!?]["')\]]?""", after):
+                score += 12
+            candidate = (score, start, size)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+    if best is None:
+        return None
+    _, start, size = best
+    return text[matches[start].start() : matches[start + size - 1].end()]
+
+
+def _quotable_segments(text: str) -> list[str]:
+    parts = [part for part in re.split(r"(?<=[.!?])\s+|;\s+", _clean_text(text)) if part]
+    passages: list[str] = []
+    for start in range(len(parts)):
+        combined = ""
+        for part in parts[start:]:
+            combined = _clean_text(f"{combined} {part}")
+            if len(_words(combined)) < MIN_SNIPPET_WORDS:
+                continue
+            passage = extract_snippet_window(combined)
+            if passage and passage not in passages:
+                passages.append(passage)
+            break
+    return passages
+
+
+def _is_boilerplate(text: str, kind: str) -> bool:
+    words = _words(text)
+    generic_count = sum(word.lower() in _GENERIC_WORDS for word in words)
+    if _BOILERPLATE.search(text) and len(words) <= 28:
+        return True
+    if len(re.findall(r"[|›»]", text)) >= 3:
+        return True
+    if generic_count / max(1, len(words)) >= 0.35:
+        return True
+    return kind == "li" and len(words) <= 8
+
+
+def _words(text: str) -> list[str]:
+    return _WORD_PATTERN.findall(text)
+
+
+def _distinctive_tokens(text: str) -> list[str]:
+    return [
+        word.lower()
+        for word in _words(text)
+        if len(word) >= 4 and word.lower() not in _STOP_WORDS
+    ]
+
+
+def _specific_name_count(text: str) -> int:
+    names = re.findall(r"\b[A-Z][A-Za-z0-9'’&/-]{2,}\b", text)
+    return sum(word.lower() not in _STOP_WORDS for word in names[1:])
 
 
 def extract_key_terms(evidence: PageEvidence, *, limit: int = MAX_KEY_TERMS) -> list[str]:

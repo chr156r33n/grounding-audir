@@ -91,7 +91,7 @@
         <aside class="panel discovery-panel">
           <div class="panel-heading">
             <span class="step">02</span>
-            <div><h2>Discover queries</h2><p>Uses OpenAI or Gemini Worker secrets to suggest grounded search phrases.</p></div>
+            <div><h2>Suggest page snippets</h2><p>Selects exact 20–30 word passages locally, with no query-generation API call.</p></div>
           </div>
           <label>
             <span>Public page URL <small>optional</small></span>
@@ -102,12 +102,10 @@
             <span>HTML or visible text</span>
             <textarea id="discovery-content" rows="8" placeholder="Paste a page title, headings, and body copy…"></textarea>
           </label>
-          <button id="discover-button" class="secondary" type="button">Discover queries</button>
+          <button id="discover-button" class="secondary" type="button">Suggest page snippets</button>
           <p id="discovery-error" class="error" role="alert"></p>
           <div id="discovery-results" hidden>
-            <p class="micro-label">Extracted vocabulary</p>
-            <div id="term-list" class="term-list"></div>
-            <p class="micro-label">Candidate queries</p>
+            <p class="micro-label">Exact page snippets</p>
             <div id="candidate-list" class="candidate-list"></div>
           </div>
         </aside>

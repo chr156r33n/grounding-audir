@@ -3,6 +3,7 @@ import {
   generatePrompts,
   promptListText,
 } from "./generator.js";
+import { NOISE_SELECTOR } from "./dom-noise.js";
 
 const $ = (selector) => document.querySelector(selector);
 const CACHE_KEY = "latestPromptResults";
@@ -68,19 +69,8 @@ async function extractRenderedEvidence() {
   if (!tab?.id) throw new Error("No active page was found.");
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => {
-      const noiseSelector = [
-        "script", "style", "noscript", "svg", "nav", "footer", "form", "header",
-        "aside", "dialog", "[hidden]", '[aria-hidden="true"]',
-        '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-        '[role="dialog"]', '[class*="breadcrumb" i]', '[class*="cookie" i]',
-        '[class*="consent" i]', '[class*="footer" i]', '[class*="header" i]',
-        '[class*="menu" i]', '[class*="modal" i]', '[class*="nav-" i]',
-        '[class*="navigation" i]', '[class*="newsletter" i]',
-        '[class*="sidebar" i]', '[class*="social" i]', '[id*="cookie" i]',
-        '[id*="consent" i]', '[id*="footer" i]', '[id*="menu" i]',
-        '[id*="navigation" i]',
-      ].join(",");
+    args: [NOISE_SELECTOR],
+    func: (noiseSelector) => {
       const root =
         document.querySelector("main, article, [role=main]") || document.body;
       const score = { H1: 85, H2: 75, H3: 65, P: 40, LI: 35 };

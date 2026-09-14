@@ -81,3 +81,53 @@ test("chatbotLinks encode complete prompts", () => {
   assert.equal(new URL(links[2].url).pathname, "/app");
   assert.equal(new URL(links[2].url).searchParams.get("q"), prompt);
 });
+
+test("falls back to shorter passages when strict windows are unavailable", async () => {
+  const shortEvidence = {
+    source: "https://example.com/short",
+    title: "Short Page About Willow Bridge Observatory",
+    chunks: [
+      {
+        kind: "p",
+        score: 40,
+        text:
+          "Willow Bridge Observatory opens each spring for guided tours across the ridge.",
+      },
+      {
+        kind: "p",
+        score: 40,
+        text:
+          "Visitors receive a printed sky chart before the evening telescope session begins.",
+      },
+    ],
+  };
+  const prompts = await generatePrompts(shortEvidence, { count: 3 });
+  assert.ok(prompts.length >= 1);
+  assert.equal(prompts[0].selectionMode, "relaxed");
+  assert.match(prompts[0].generationMethod, /fallback/);
+  for (const item of prompts) {
+    const words = item.passage.match(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g) || [];
+    assert.ok(words.length >= 12);
+    assert.ok(words.length < 20);
+  }
+});
+
+test("broad fallback uses title when chunks are too thin", async () => {
+  const thinEvidence = {
+    source: "https://example.com/thin",
+    title: "Rare Alpine Lichen Survey Field Notes",
+    chunks: [
+      {
+        kind: "p",
+        score: 40,
+        text: "Hello world today.",
+      },
+    ],
+  };
+  const prompts = await generatePrompts(thinEvidence, { count: 3 });
+  assert.ok(prompts.length >= 1);
+  assert.equal(prompts[0].selectionMode, "broad");
+  assert.ok(
+    prompts.some((item) => item.passage.includes("Alpine Lichen")),
+  );
+});

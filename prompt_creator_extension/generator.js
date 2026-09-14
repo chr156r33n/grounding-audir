@@ -1,5 +1,6 @@
 const MIN_WORDS = 20;
 const MAX_WORDS = 30;
+const FALLBACK_MIN_WORDS = 12;
 const STOP_WORDS = new Set([
   "about", "after", "also", "and", "are", "because", "been", "before", "being",
   "between", "both", "but", "can", "does", "for", "from", "has", "have", "into",
@@ -17,21 +18,25 @@ const GENERIC = new Set([
 const BOILERPLATE =
   /\b(?:accept (?:all )?cookies?|cookie (?:policy|settings?)|privacy policy|terms (?:and|&) conditions|sign (?:in|up)|log in|register|subscribe|newsletter|skip to content|read more|learn more|view all|contact us|follow us|share (?:this|on)|add to (?:cart|basket)|open menu|close menu|back to top|all rights reserved)\b/i;
 
-export function selectQuotablePassages(evidence, limit = 15) {
+export function selectQuotablePassages(evidence, limit = 15, options = {}) {
+  const minWords = options.minWords ?? MIN_WORDS;
+  const maxWords = options.maxWords ?? MAX_WORDS;
+  const requireDistinctive = options.requireDistinctive !== false;
   const kindBonus = {
     meta_description: 35,
     h1: 30,
     h2: 22,
     h3: 14,
     p: 8,
+    div: 5,
     li: 4,
   };
   const raw = [];
   for (const chunk of evidence.chunks) {
-    for (const passage of quotableSegments(chunk.text)) {
+    for (const passage of quotableSegments(chunk.text, minWords, maxWords)) {
       if (isBoilerplate(passage, chunk.kind)) continue;
       const tokens = distinctiveTokens(passage);
-      if (new Set(tokens).size < 3) continue;
+      if (requireDistinctive && new Set(tokens).size < 3) continue;
       raw.push({
         passage,
         supportingText: chunk.text.slice(0, 600),
@@ -86,16 +91,19 @@ export function selectQuotablePassages(evidence, limit = 15) {
   return selected;
 }
 
-export function extractQuoteWindow(text) {
+export function extractQuoteWindow(
+  text,
+  { minWords = MIN_WORDS, maxWords = MAX_WORDS } = {},
+) {
   const matches = [...text.matchAll(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g)];
-  if (matches.length < MIN_WORDS) return null;
-  if (matches.length <= MAX_WORDS) {
+  if (matches.length < minWords) return null;
+  if (matches.length <= maxWords) {
     const last = matches.at(-1);
     return text.slice(matches[0].index, last.index + last[0].length);
   }
 
   let best = null;
-  for (let size = MAX_WORDS; size >= MIN_WORDS; size -= 1) {
+  for (let size = maxWords; size >= minWords; size -= 1) {
     for (let start = 0; start <= matches.length - size; start += 1) {
       let score = 0;
       for (const match of matches.slice(start, start + size)) {
@@ -150,12 +158,26 @@ export function parseSelection(value, candidateCount) {
 
 export async function generatePrompts(evidence, { count = 5, session, rankPassages } = {}) {
   const requested = Math.max(3, Math.min(Number(count), 8));
-  const pool = selectQuotablePassages(evidence, Math.max(12, requested * 3));
+  const poolSize = Math.max(12, requested * 3);
+  let pool = selectQuotablePassages(evidence, poolSize);
+  let selectionMode = "strict";
   if (!pool.length) {
-    throw new Error("This page did not contain enough specific 20–30 word passages.");
+    pool = selectQuotablePassages(evidence, poolSize, {
+      minWords: FALLBACK_MIN_WORDS,
+      maxWords: MAX_WORDS,
+      requireDistinctive: false,
+    });
+    selectionMode = "relaxed";
+  }
+  if (!pool.length) {
+    pool = emergencyPassages(evidence, poolSize);
+    selectionMode = "broad";
+  }
+  if (!pool.length) {
+    throw new Error("This page did not contain enough readable text to quote.");
   }
   let selectedIds = [];
-  if (session && rankPassages) {
+  if (session && rankPassages && selectionMode === "strict") {
     try {
       const response = await rankPassages(
         session,
@@ -175,9 +197,12 @@ export async function generatePrompts(evidence, { count = 5, session, rankPassag
     prompt: `"${pool[id].passage}" please retrieve a web page with this exact text`,
     passage: pool[id].passage,
     supportingText: pool[id].supportingText,
+    selectionMode,
     generationMethod: modelSelected.has(id)
       ? "chrome_ai_selection"
-      : "heuristic_selection",
+      : selectionMode === "strict"
+        ? "heuristic_selection"
+        : `heuristic_${selectionMode}_fallback`,
   }));
 }
 
@@ -197,7 +222,50 @@ export function promptListText(prompts) {
   return prompts.map((item) => item.prompt).join("\n\n");
 }
 
-function quotableSegments(text) {
+function emergencyPassages(evidence, limit) {
+  const candidates = [];
+  for (const chunk of evidence.chunks || []) {
+    const text = clean(chunk.text);
+    if (!text) continue;
+    if (isBoilerplate(text, chunk.kind)) continue;
+    const words = wordCount(text);
+    if (words < 8) continue;
+    let passage = extractQuoteWindow(text, {
+      minWords: 8,
+      maxWords: MAX_WORDS,
+    });
+    if (!passage) {
+      const matches = [...text.matchAll(/[A-Za-z0-9][A-Za-z0-9'’&/-]*/g)];
+      if (matches.length < 8) continue;
+      const last = matches[Math.min(matches.length, MAX_WORDS) - 1];
+      passage = text.slice(matches[0].index, last.index + last[0].length);
+    }
+    candidates.push({
+      passage,
+      supportingText: text.slice(0, 600),
+      kind: chunk.kind,
+      score: (chunk.score || 20) - 15,
+      tokens: distinctiveTokens(passage),
+    });
+  }
+  if (evidence.title && wordCount(evidence.title) >= 5) {
+    candidates.push({
+      passage: clean(evidence.title),
+      supportingText: clean(evidence.title),
+      kind: "h1",
+      score: 10,
+      tokens: distinctiveTokens(evidence.title),
+    });
+  }
+  return candidates
+    .sort((a, b) => b.score - a.score || b.passage.length - a.passage.length)
+    .filter((item, index, list) =>
+      list.findIndex((other) => other.passage === item.passage) === index,
+    )
+    .slice(0, limit);
+}
+
+function quotableSegments(text, minWords = MIN_WORDS, maxWords = MAX_WORDS) {
   const parts = clean(text)
     .split(/(?<=[.!?])\s+|;\s+/)
     .filter(Boolean);
@@ -206,8 +274,8 @@ function quotableSegments(text) {
     let combined = "";
     for (let end = start; end < parts.length; end += 1) {
       combined = clean(`${combined} ${parts[end]}`);
-      if (wordCount(combined) < MIN_WORDS) continue;
-      const passage = extractQuoteWindow(combined);
+      if (wordCount(combined) < minWords) continue;
+      const passage = extractQuoteWindow(combined, { minWords, maxWords });
       if (passage && !passages.includes(passage)) passages.push(passage);
       break;
     }

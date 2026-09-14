@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "exactly matchy",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Create exact-match prompts from page text to check whether AI chatbots can retrieve and attribute the page.",
   "icons": {
     "16": "icons/icon-16.png",

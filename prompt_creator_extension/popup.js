@@ -71,10 +71,9 @@ async function extractRenderedEvidence() {
     target: { tabId: tab.id },
     args: [NOISE_SELECTOR],
     func: (noiseSelector) => {
-      const root =
-        document.querySelector("main, article, [role=main]") || document.body;
-      const score = { H1: 85, H2: 75, H3: 65, P: 40, LI: 35 };
-      const chunks = [];
+      const score = { H1: 85, H2: 75, H3: 65, P: 40, DIV: 28, LI: 35 };
+      const hardNoise =
+        'script, style, noscript, svg, nav, footer, form, header, aside, dialog';
       const description =
         document
           .querySelector(
@@ -82,31 +81,79 @@ async function extractRenderedEvidence() {
           )
           ?.getAttribute("content")
           ?.trim() || null;
-      if (description) {
-        chunks.push({
-          kind: "meta_description",
-          text: description.replace(/\s+/g, " ").trim().slice(0, 900),
-          score: 95,
+
+      function collect(root, { useClassNoise, includeDivs, minBody }) {
+        const selector = includeDivs
+          ? "h1, h2, h3, p, li, div"
+          : "h1, h2, h3, p, li";
+        const chunks = [];
+        for (const element of root.querySelectorAll(selector)) {
+          if (element.closest(hardNoise)) continue;
+          if (useClassNoise && element.closest(noiseSelector)) continue;
+          if (!element.getClientRects().length) continue;
+          if (includeDivs && element.tagName === "DIV") {
+            // Prefer leaf-ish copy blocks; skip huge wrappers.
+            if (element.querySelector("p, h1, h2, h3, li, div")) continue;
+          }
+          const text = element.innerText.replace(/\s+/g, " ").trim();
+          const minimum = /^H[1-3]$/.test(element.tagName) ? 12 : minBody;
+          if (text.length < minimum) continue;
+          chunks.push({
+            kind: element.tagName.toLowerCase(),
+            text: text.slice(0, 900),
+            score: score[element.tagName] || 40,
+          });
+          if (chunks.length >= 80) break;
+        }
+        return chunks;
+      }
+
+      function withMeta(chunks) {
+        if (!description) return chunks;
+        return [
+          {
+            kind: "meta_description",
+            text: description.replace(/\s+/g, " ").trim().slice(0, 900),
+            score: 95,
+          },
+          ...chunks,
+        ];
+      }
+
+      const main =
+        document.querySelector("main, article, [role=main]") || document.body;
+      let extractionMode = "strict";
+      let chunks = collect(main, {
+        useClassNoise: true,
+        includeDivs: false,
+        minBody: 40,
+      });
+      const bodyCount = (list) =>
+        list.filter((chunk) => chunk.kind !== "meta_description").length;
+
+      if (bodyCount(chunks) < 2) {
+        extractionMode = "relaxed";
+        chunks = collect(document.body, {
+          useClassNoise: true,
+          includeDivs: true,
+          minBody: 48,
         });
       }
-      for (const element of root.querySelectorAll("h1, h2, h3, p, li")) {
-        if (element.closest(noiseSelector)) continue;
-        if (!element.getClientRects().length) continue;
-        const text = element.innerText.replace(/\s+/g, " ").trim();
-        const minimum = /^H[1-3]$/.test(element.tagName) ? 12 : 40;
-        if (text.length < minimum) continue;
-        chunks.push({
-          kind: element.tagName.toLowerCase(),
-          text: text.slice(0, 900),
-          score: score[element.tagName] || 40,
+      if (bodyCount(chunks) < 1) {
+        extractionMode = "broad";
+        chunks = collect(document.body, {
+          useClassNoise: false,
+          includeDivs: true,
+          minBody: 32,
         });
-        if (chunks.length >= 80) break;
       }
+
       return {
         source: location.href,
         title: document.title || null,
         description,
-        chunks,
+        extractionMode,
+        chunks: withMeta(chunks),
       };
     },
   });
@@ -116,10 +163,26 @@ async function extractRenderedEvidence() {
   return result;
 }
 
+function qualityLabel(prompts, evidence, usedChromeAi) {
+  const selectionMode = prompts[0]?.selectionMode || "strict";
+  const extractionMode = evidence.extractionMode || "strict";
+  if (usedChromeAi && selectionMode === "strict" && extractionMode === "strict") {
+    return "Chrome AI selection";
+  }
+  if (selectionMode !== "strict" || extractionMode !== "strict") {
+    const parts = [];
+    if (extractionMode !== "strict") parts.push(`${extractionMode} extraction`);
+    if (selectionMode !== "strict") parts.push(`${selectionMode} passages`);
+    else parts.push(usedChromeAi ? "Chrome AI selection" : "heuristic selection");
+    return `fallback · ${parts.join(" · ")}`;
+  }
+  return "heuristic selection";
+}
+
 function render(prompts, evidence, usedChromeAi, restored = false) {
   $("#page-title").textContent =
     `${evidence.title || evidence.source} · ` +
-    `${usedChromeAi ? "Chrome AI selection" : "heuristic selection"}` +
+    `${qualityLabel(prompts, evidence, usedChromeAi)}` +
     `${restored ? " · restored" : ""}`;
   $("#prompt-list").innerHTML = prompts
     .map(
@@ -163,6 +226,7 @@ async function cacheResults(prompts, evidence, usedChromeAi) {
         evidence: {
           source: evidence.source,
           title: evidence.title,
+          extractionMode: evidence.extractionMode || "strict",
         },
         usedChromeAi,
         count: Number($("#count").value || 5),
@@ -208,9 +272,17 @@ $("#analyze").addEventListener("click", async () => {
     );
     render(prompts, evidence, usedChromeAi);
     await cacheResults(prompts, evidence, usedChromeAi);
-    $("#model-status").textContent = usedChromeAi
-      ? "Chrome AI ready"
-      : "Chrome AI unavailable — heuristic selection used";
+    const fallbackUsed =
+      (evidence.extractionMode && evidence.extractionMode !== "strict") ||
+      prompts.some((item) => (item.selectionMode || "strict") !== "strict");
+    if (fallbackUsed) {
+      $("#model-status").textContent =
+        "Used fallback extraction/selection — review passages carefully";
+    } else {
+      $("#model-status").textContent = usedChromeAi
+        ? "Chrome AI ready"
+        : "Chrome AI unavailable — heuristic selection used";
+    }
   } catch (error) {
     $("#error").textContent =
       error?.message || "The current page could not be analyzed.";

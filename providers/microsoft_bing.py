@@ -20,7 +20,7 @@ from .model_catalog import MICROSOFT_BING_GROUNDING, azure_token_field, deployme
 class MicrosoftBingProvider(GroundingProvider):
     id = "microsoft_bing"
     name = "Microsoft Grounding with Bing Search"
-    default_model = "gpt-4.1-mini"
+    default_model = "gpt-5-mini"
     timeout_seconds = 120.0
     api_version = "v1"
     fields = (
